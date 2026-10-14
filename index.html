@@ -101,6 +101,8 @@ button{cursor:pointer}
 .addr{display:inline-block;align-self:flex-start;min-height:34px;padding:6px 0;font-size:13px;color:var(--accent);text-decoration:underline;overflow-wrap:anywhere}
 .brs{margin:0}.brs summary{cursor:pointer;min-height:34px;padding:6px 0;font-size:13px;color:var(--accent)}
 .brs .addr{display:block}
+.brnear{display:block;min-height:36px;padding:6px 0}
+.brmsg{display:block;padding-bottom:4px}
 .br{display:flex;flex-direction:column;gap:6px;padding:8px 0;border-top:1px solid var(--line)}
 .br:first-child{border-top:none;padding-top:0}
 .br-top{display:flex;gap:6px}
@@ -194,7 +196,7 @@ function cleanBranches(p){var src=Array.isArray(p.branches)?p.branches:(typeof p
 function brForm(p){var b=cleanBranches(p).map(function(x){return JSON.parse(JSON.stringify(x));});return b.length?b:[{name:'',address:''}];}
 function brAreaHtml(){var F=S.form,h=F.branches.map(function(b,i){return '<div class="br"><div class="br-top"><input class="input" data-bi="'+i+'" data-bf="name" maxlength="30" autocomplete="off" aria-label="分店名" placeholder="'+(i?'分店名，例如：Bangsar':'分店名（選填），例如：SS2')+'" value="'+esc(b.name)+'">'+(F.branches.length>1?'<button type="button" class="del" data-rmbr="'+i+'" aria-label="刪除這個地址">×</button>':'')+'</div><input class="input" data-bi="'+i+'" data-bf="address" maxlength="120" autocomplete="off" aria-label="地址" placeholder="地址，例如：12 Jalan SS2/24, Petaling Jaya" value="'+esc(b.address)+'"></div>';}).join('');if(F.branches.length<MAX_BRANCHES) h+='<button type="button" class="btn btn-sm btn-ghost" data-act="addbranch">+ 加分店</button>';return h;}
 function hav(a,b,c,d){var r=Math.PI/180,x=(c-a)*r,y=(d-b)*r,h=Math.sin(x/2)*Math.sin(x/2)+Math.cos(a*r)*Math.cos(c*r)*Math.sin(y/2)*Math.sin(y/2);return 12742*Math.asin(Math.sqrt(h));}
-function brDist(b){return (S.near&&typeof b.lat==='number'&&typeof b.lng==='number')?hav(S.near.lat,S.near.lng,b.lat,b.lng):null;}
+function brDist(b,p){var pos=S.near||(p&&S.nearOne[p.id]?S.pos:null);return (pos&&typeof b.lat==='number'&&typeof b.lng==='number')?hav(pos.lat,pos.lng,b.lat,b.lng):null;}
 function placeDist(p){var m=null;(p.branches||[]).forEach(function(b){var d=brDist(b);if(d!==null&&(m===null||d<m)) m=d;});return m;}
 function fmtDist(d){return d<1?'直線約 '+(Math.max(1,Math.round(d*100))*10)+' 公尺':'直線約 '+(d<10?d.toFixed(1):Math.round(d))+' 公里';}
 function hasAddr(p){return !!(p.branches&&p.branches.length);}
@@ -216,48 +218,83 @@ function geocodeOne(addr,pos,cb){
   }
   go();
 }
-function geoNext(q,k,pos,st){
+function geoNext(q,k,pos,st,fin,say){
   var it;
-  if(k>=q.length){
-    S.nearBusy=false;
-    var any=S.places.some(function(p){return (p.branches||[]).some(function(b){return typeof b.lat==='number';});}), miss=0;
-    S.places.forEach(function(p){(p.branches||[]).forEach(function(b){if(typeof b.lat!=='number') miss++;});});
-    if(!any){S.nearMsg='找不到這些地址的位置。地址寫得越完整（含城市）越準。';nearUi();return;}
-    S.near=pos; S.nearMsg=miss?miss+' 個地址找不到位置，沒有排進距離。距離是直線距離，只供參考。':'距離是直線距離，只供參考。';
-    if($('listArea')) refreshList(); else nearUi();
-    return;
-  }
-  it=q[k]; nearSet('查地址位置 '+(k+1)+' / '+q.length+'…（地址會送到 OpenStreetMap 查詢，每個只查一次）');
+  if(k>=q.length){fin(true);return;}
+  it=q[k]; say('查地址位置 '+(k+1)+' / '+q.length+'…（地址會送到 OpenStreetMap 查詢，每個只查一次）');
   geocodeOne(it.address,pos,function(res){
     var p=null,b;
     S.places.forEach(function(x){if(x.id===it.pid) p=x;});
     b=p&&p.branches&&p.branches[it.i];
     if(res==='err'){
       st.net++;
-      if(st.net>=2){save();S.nearBusy=false;nearSet('連不上地圖服務，請檢查網路後再試。');return;}
+      if(st.net>=2){save();fin(false,'連不上地圖服務，請檢查網路後再試。');return;}
     }else if(b&&b.address===it.address){
       if(res){b.lat=Math.round(res.lat*1e5)/1e5;b.lng=Math.round(res.lng*1e5)/1e5;delete b.nf;}else b.nf=true;
     }
     save();
-    if(k+1<q.length) setTimeout(function(){geoNext(q,k+1,pos,st);},1100); else geoNext(q,k+1,pos,st);
+    if(k+1<q.length) setTimeout(function(){geoNext(q,k+1,pos,st,fin,say);},1100); else geoNext(q,k+1,pos,st,fin,say);
   });
 }
+function locate(list,say,fin){
+  if(!navigator.geolocation){fin(null,'這個瀏覽器不能取得位置。');return;}
+  say('正在取得你的位置…');
+  navigator.geolocation.getCurrentPosition(function(pos){
+    var q=[], here={lat:pos.coords.latitude,lng:pos.coords.longitude};
+    list.forEach(function(p){(p.branches||[]).forEach(function(b,i){if(typeof b.lat!=='number'&&!b.nf) q.push({pid:p.id,i:i,address:b.address});});});
+    geoNext(q,0,here,{net:0},function(ok,msg){fin(ok?here:null,msg);},say);
+  },function(err){
+    fin(null,err&&err.code===1?'沒有位置權限。請在瀏覽器設定允許這個網站使用位置，再試一次。':'取得不到你的位置，請稍後再試。');
+  },{enableHighAccuracy:false,timeout:12000,maximumAge:60000});
+}
+function countBr(list){var any=0,miss=0;list.forEach(function(p){(p.branches||[]).forEach(function(b){if(typeof b.lat==='number') any++; else miss++;});});return {any:any,miss:miss};}
 function startNearest(){
   if(S.near){S.near=null;S.nearMsg='';refreshList();return;}
   if(!S.places.some(hasAddr)){nearSet('還沒有店存了地址。請先編輯店，填上地址。');return;}
-  if(!navigator.geolocation){nearSet('這個瀏覽器不能取得位置。');return;}
-  S.nearBusy=true; nearSet('正在取得你的位置…');
-  navigator.geolocation.getCurrentPosition(function(pos){
-    var q=[], here={lat:pos.coords.latitude,lng:pos.coords.longitude};
-    S.places.forEach(function(p){(p.branches||[]).forEach(function(b,i){if(typeof b.lat!=='number'&&!b.nf) q.push({pid:p.id,i:i,address:b.address});});});
-    geoNext(q,0,here,{net:0});
-  },function(err){
+  S.nearBusy=true;
+  locate(S.places,nearSet,function(pos,msg){
+    var c;
     S.nearBusy=false;
-    nearSet(err&&err.code===1?'沒有位置權限。請在瀏覽器設定允許這個網站使用位置，再試一次。':'取得不到你的位置，請稍後再試。');
-  },{enableHighAccuracy:false,timeout:12000,maximumAge:60000});
+    if(!pos){nearSet(msg||'');return;}
+    c=countBr(S.places);
+    if(!c.any){nearSet('找不到這些地址的位置。地址寫得越完整（含城市）越準。');return;}
+    S.pos=pos; S.near=pos; S.nearMsg=(c.miss?c.miss+' 個地址找不到位置，沒有排進距離。':'')+'距離是直線距離，只供參考。';
+    if($('listArea')) refreshList(); else nearUi();
+  });
 }
-function brLink(b,showName){var d=brDist(b);return '<a class="addr" href="'+esc(mapUrl(b.address))+'" target="_blank" rel="noopener noreferrer">📍 '+(d!==null?esc(fmtDist(d))+' · ':'')+(showName&&b.name?esc(b.name)+' · ':'')+esc(b.address)+'</a>';}
-function addrHtml(p){var b=(p.branches||[]).map(function(x,i){return {b:x,i:i,d:brDist(x)};});if(S.near) b.sort(function(x,y){return (x.d===null)-(y.d===null)||(x.d-y.d)||(x.i-y.i);});b=b.map(function(x){return x.b;});if(!b.length) return '';if(b.length===1) return brLink(b[0],true);return '<details class="brs"><summary>📍 '+b.length+' 間分店</summary>'+b.map(function(x){return brLink(x,true);}).join('')+'</details>';}
+function startNearOne(pid){
+  var p=null;
+  S.places.forEach(function(x){if(x.id===pid) p=x;});
+  if(!p) return;
+  if(S.nearOne[pid]){delete S.nearOne[pid];delete S.oneMsg[pid];refreshList();return;}
+  if(S.oneBusy) return;
+  S.oneBusy=pid; S.oneMsg[pid]='…'; refreshList();
+  locate([p],function(m){S.oneMsg[pid]=m;if($('listArea')) refreshList();},function(pos,msg){
+    var q=null,c;
+    S.oneBusy=null;
+    S.places.forEach(function(x){if(x.id===pid) q=x;});
+    if(!pos||!q){S.oneMsg[pid]=msg||'';}
+    else{
+      c=countBr([q]);
+      if(!c.any) S.oneMsg[pid]='找不到這些地址的位置。地址寫得越完整（含城市）越準。';
+      else{S.pos=pos;S.nearOne[pid]=true;S.oneMsg[pid]=(c.miss?c.miss+' 個地址找不到位置。':'')+'直線距離，只供參考。';}
+    }
+    if($('listArea')) refreshList();
+  });
+}
+function brLink(b,showName,p){var d=brDist(b,p);return '<a class="addr" href="'+esc(mapUrl(b.address))+'" target="_blank" rel="noopener noreferrer">📍 '+(d!==null?esc(fmtDist(d))+' · ':'')+(showName&&b.name?esc(b.name)+' · ':'')+esc(b.address)+'</a>';}
+function addrHtml(p){
+  var b=(p.branches||[]).map(function(x,i){return {b:x,i:i,d:brDist(x,p)};}), on=!!(S.near||S.nearOne[p.id]), h, first, lab;
+  if(!b.length) return '';
+  if(b.length===1) return brLink(b[0].b,true,p);
+  if(on) b.sort(function(x,y){return (x.d===null)-(y.d===null)||(x.d-y.d)||(x.i-y.i);});
+  first=b[0];
+  lab=(on&&first.d!==null)?' · 最近：'+esc(first.b.name||first.b.address.slice(0,16))+'（'+esc(fmtDist(first.d))+'）':'';
+  h='<details class="brs"'+((S.nearOne[p.id]||S.oneMsg[p.id])?' open':'')+'><summary>📍 '+b.length+' 間分店'+lab+'</summary>'+b.map(function(x){return brLink(x.b,true,p);}).join('');
+  if(!S.near) h+='<button type="button" class="link brnear" data-nearone="'+esc(p.id)+'"'+(S.oneBusy===p.id?' disabled':'')+'>'+(S.nearOne[p.id]?'✕ 取消最近分店排序':(S.oneBusy===p.id?'查詢中…':'📍 離我最近的分店'))+'</button>';
+  if(S.oneMsg[p.id]&&S.oneMsg[p.id]!=='…') h+='<span class="sub brmsg" role="status">'+esc(S.oneMsg[p.id])+'</span>';
+  return h+'</details>';
+}
 var PHOTO_PREFIX='data:image/jpeg;base64,', PHOTO_MAX=150000;
 var IC_CAM='<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>';
 var IC_SHOP='<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9l1.5-5h13L20 9M4 9v10h16V9M4 9c0 1.7 1.3 3 2.7 3S9.3 10.7 9.3 9c0 1.7 1.3 3 2.7 3s2.7-1.3 2.7-3c0 1.7 1.3 3 2.7 3S20 10.7 20 9M10 19v-4h4v4"/></svg>';
@@ -321,7 +358,7 @@ function readPhoto(file,cb,side,quality){
   img.src=url;
 }
 
-var S={map:loadMap(),places:[],form:null,delAsk:null,justSaved:false,backup:{open:false,code:'',msg:'',text:''},filtOpen:false,q:{text:'',cuisines:{},kinds:{},meals:{},budgets:{},openNow:false}};
+var S={nearOne:{},oneMsg:{},oneBusy:null,pos:null,map:loadMap(),places:[],form:null,delAsk:null,justSaved:false,backup:{open:false,code:'',msg:'',text:''},filtOpen:false,q:{text:'',cuisines:{},kinds:{},meals:{},budgets:{},openNow:false}};
 
 function esc(x){return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function $(id){return document.getElementById(id);}
@@ -568,7 +605,7 @@ function refreshList(){
 
 /* ---------- events ---------- */
 document.addEventListener('click',function(e){
-  var el=e.target&&e.target.closest?e.target.closest('[data-act],[data-cuisine],[data-kind],[data-meal],[data-budget],[data-map],[data-rmbr],[data-rmdish],[data-del],[data-edit],[data-fc],[data-fk],[data-fm],[data-fb],[data-fo],[data-hm],[data-hd],[data-wi],[data-rmfood]'):null, v, F=S.form, inp;
+  var el=e.target&&e.target.closest?e.target.closest('[data-act],[data-cuisine],[data-kind],[data-meal],[data-budget],[data-map],[data-rmbr],[data-nearone],[data-rmdish],[data-del],[data-edit],[data-fc],[data-fk],[data-fm],[data-fb],[data-fo],[data-hm],[data-hd],[data-wi],[data-rmfood]'):null, v, F=S.form, inp;
   if(S.delAsk&&!(el&&el.hasAttribute('data-del'))){S.delAsk=null;render();}
   if(!el) return;
   if(el.hasAttribute('data-del')){
@@ -590,6 +627,7 @@ document.addEventListener('click',function(e){
     F.branches.splice(parseInt(el.getAttribute('data-rmbr'),10),1); if(!F.branches.length) F.branches.push({name:'',address:''});
     $('brArea').innerHTML=brAreaHtml(); return;
   }
+  if(el.hasAttribute('data-nearone')){startNearOne(el.getAttribute('data-nearone'));return;}
   if(el.hasAttribute('data-map')){
     S.map=el.getAttribute('data-map');
     try{localStorage.setItem(MAPKEY,S.map);}catch(err){}
