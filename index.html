@@ -195,10 +195,10 @@ function mapPickHtml(){return '<div class="fl">點地址用哪個地圖開啟</d
 function cleanBranches(p){var src=Array.isArray(p.branches)?p.branches:(typeof p.address==='string'&&p.address.trim()?[{name:'',address:p.address}]:[]),out=[];src.forEach(function(b){var a,o;if(!b||typeof b!=='object')return;a=cleanAddr(b.address);if(a){o={name:cleanAddr(b.name).slice(0,30),address:a};if(typeof b.lat==='number'&&typeof b.lng==='number'&&isFinite(b.lat)&&isFinite(b.lng)&&Math.abs(b.lat)<=90&&Math.abs(b.lng)<=180){o.lat=Math.round(b.lat*1e5)/1e5;o.lng=Math.round(b.lng*1e5)/1e5;}else if(b.nf===true) o.nf=true;out.push(o);}});return out.slice(0,MAX_BRANCHES);}
 function brForm(p){var b=cleanBranches(p).map(function(x){return JSON.parse(JSON.stringify(x));});return b.length?b:[{name:'',address:''}];}
 function brAreaHtml(){var F=S.form,h=F.branches.map(function(b,i){return '<div class="br"><div class="br-top"><input class="input" data-bi="'+i+'" data-bf="name" maxlength="30" autocomplete="off" aria-label="分店名" placeholder="'+(i?'分店名，例如：Bangsar':'分店名（選填），例如：SS2')+'" value="'+esc(b.name)+'">'+(F.branches.length>1?'<button type="button" class="del" data-rmbr="'+i+'" aria-label="刪除這個地址">×</button>':'')+'</div><input class="input" data-bi="'+i+'" data-bf="address" maxlength="120" autocomplete="off" aria-label="地址" placeholder="地址，例如：12 Jalan SS2/24, Petaling Jaya" value="'+esc(b.address)+'"></div>';}).join('');if(F.branches.length<MAX_BRANCHES) h+='<button type="button" class="btn btn-sm btn-ghost" data-act="addbranch">+ 加分店</button>';return h;}
-function driveKey(p,b){return p.id+'|'+b.address;}
-function brDist(b,p){var v;if(!p||!(S.near||S.nearOne[p.id])) return null;v=S.drive[driveKey(p,b)];return typeof v==='number'?v:null;}
-function placeDist(p){var m=null;(p.branches||[]).forEach(function(b){var d=brDist(b,p);if(d!==null&&(m===null||d<m)) m=d;});return m;}
-function fmtDist(d){return d<1?'開車約 '+(Math.max(1,Math.round(d*100))*10)+' 公尺':'開車約 '+(d<10?d.toFixed(1):Math.round(d))+' 公里';}
+function hav(a,b,c,d){var r=Math.PI/180,x=(c-a)*r,y=(d-b)*r,h=Math.sin(x/2)*Math.sin(x/2)+Math.cos(a*r)*Math.cos(c*r)*Math.sin(y/2)*Math.sin(y/2);return 12742*Math.asin(Math.sqrt(h));}
+function brDist(b,p){var pos=S.near||(p&&S.nearOne[p.id]?S.pos:null);return (pos&&typeof b.lat==='number'&&typeof b.lng==='number')?hav(pos.lat,pos.lng,b.lat,b.lng):null;}
+function placeDist(p){var m=null;(p.branches||[]).forEach(function(b){var d=brDist(b);if(d!==null&&(m===null||d<m)) m=d;});return m;}
+function fmtDist(d){return d<1?'直線約 '+(Math.max(1,Math.round(d*100))*10)+' 公尺':'直線約 '+(d<10?d.toFixed(1):Math.round(d))+' 公里';}
 function hasAddr(p){return !!(p.branches&&p.branches.length);}
 function nearUi(){var b=$('nearBtn'),m=$('nearMsg');if(!b) return;b.textContent=S.nearBusy?'處理中…':(S.near?'✕ 取消距離排序':'📍 離我最近');b.disabled=!!S.nearBusy;m.textContent=S.nearMsg||'';}
 function nearSet(msg){S.nearMsg=msg||'';nearUi();}
@@ -236,41 +236,18 @@ function geoNext(q,k,pos,st,fin,say){
     if(k+1<q.length) setTimeout(function(){geoNext(q,k+1,pos,st,fin,say);},1100); else geoNext(q,k+1,pos,st,fin,say);
   });
 }
-function driveDists(here,list,say,fin){
-  var items=[], k=0, CH=90;
-  list.forEach(function(p){(p.branches||[]).forEach(function(b){delete S.drive[driveKey(p,b)];if(typeof b.lat==='number') items.push({p:p,b:b});});});
-  function next(){
-    var part=items.slice(k,k+CH), coords, ctl, t, url;
-    if(!part.length){fin(true);return;}
-    say('計算開車距離…（你的位置和店的座標會送到 OSRM 路線服務）');
-    coords=[here.lng+','+here.lat].concat(part.map(function(x){return x.b.lng+','+x.b.lat;})).join(';');
-    ctl=window.AbortController?new AbortController():null; t=setTimeout(function(){if(ctl) ctl.abort();},15000);
-    url='https://router.project-osrm.org/table/v1/driving/'+coords+'?sources=0&annotations=distance';
-    fetch(url,ctl?{signal:ctl.signal}:{}).then(function(r){if(!r.ok) throw 0;return r.json();}).then(function(j){
-      var row=j&&j.code==='Ok'&&j.distances&&j.distances[0];
-      clearTimeout(t);
-      if(!row) throw 0;
-      part.forEach(function(x,i){var m=row[i+1];if(typeof m==='number'&&isFinite(m)) S.drive[driveKey(x.p,x.b)]=m/1000;});
-      k+=CH; next();
-    }).catch(function(){clearTimeout(t);fin(false,'算不出開車距離（路線服務連不上），請稍後再試。');});
-  }
-  next();
-}
 function locate(list,say,fin){
   if(!navigator.geolocation){fin(null,'這個瀏覽器不能取得位置。');return;}
   say('正在取得你的位置…');
   navigator.geolocation.getCurrentPosition(function(pos){
     var q=[], here={lat:pos.coords.latitude,lng:pos.coords.longitude};
     list.forEach(function(p){(p.branches||[]).forEach(function(b,i){if(typeof b.lat!=='number'&&!b.nf) q.push({pid:p.id,i:i,address:b.address});});});
-    geoNext(q,0,here,{net:0},function(ok,msg){
-      if(!ok){fin(null,msg);return;}
-      driveDists(here,list,say,function(ok2,msg2){fin(ok2?here:null,msg2);});
-    },say);
+    geoNext(q,0,here,{net:0},function(ok,msg){fin(ok?here:null,msg);},say);
   },function(err){
     fin(null,err&&err.code===1?'沒有位置權限。請在瀏覽器設定允許這個網站使用位置，再試一次。':'取得不到你的位置，請稍後再試。');
   },{enableHighAccuracy:false,timeout:12000,maximumAge:60000});
 }
-function countBr(list){var any=0,miss=0;list.forEach(function(p){(p.branches||[]).forEach(function(b){if(typeof S.drive[driveKey(p,b)]==='number') any++; else miss++;});});return {any:any,miss:miss};}
+function countBr(list){var any=0,miss=0;list.forEach(function(p){(p.branches||[]).forEach(function(b){if(typeof b.lat==='number') any++; else miss++;});});return {any:any,miss:miss};}
 function startNearest(){
   if(S.near){S.near=null;S.nearMsg='';refreshList();return;}
   if(!S.places.some(hasAddr)){nearSet('還沒有店存了地址。請先編輯店，填上地址。');return;}
@@ -280,8 +257,8 @@ function startNearest(){
     S.nearBusy=false;
     if(!pos){nearSet(msg||'');return;}
     c=countBr(S.places);
-    if(!c.any){nearSet('算不出這些地址的開車距離。地址寫得越完整（含城市）越準。');return;}
-    S.pos=pos; S.near=pos; S.nearMsg=(c.miss?c.miss+' 個地址找不到位置或路線，沒有排進距離。':'')+'開車距離來自 OpenStreetMap 路網，不含即時路況，和 Google 地圖可能略有差異。';
+    if(!c.any){nearSet('找不到這些地址的位置。地址寫得越完整（含城市）越準。');return;}
+    S.pos=pos; S.near=pos; S.nearMsg=(c.miss?c.miss+' 個地址找不到位置，沒有排進距離。':'')+'距離是直線距離，只供參考。';
     if($('listArea')) refreshList(); else nearUi();
   });
 }
@@ -299,8 +276,8 @@ function startNearOne(pid){
     if(!pos||!q){S.oneMsg[pid]=msg||'';}
     else{
       c=countBr([q]);
-      if(!c.any) S.oneMsg[pid]='算不出這些地址的開車距離。地址寫得越完整（含城市）越準。';
-      else{S.pos=pos;S.nearOne={};S.nearOne[pid]=true;S.oneMsg[pid]=(c.miss?c.miss+' 個地址找不到位置或路線。':'')+'開車距離來自 OpenStreetMap 路網，不含即時路況。';}
+      if(!c.any) S.oneMsg[pid]='找不到這些地址的位置。地址寫得越完整（含城市）越準。';
+      else{S.pos=pos;S.nearOne[pid]=true;S.oneMsg[pid]=(c.miss?c.miss+' 個地址找不到位置。':'')+'直線距離，只供參考。';}
     }
     if($('listArea')) refreshList();
   });
@@ -381,7 +358,7 @@ function readPhoto(file,cb,side,quality){
   img.src=url;
 }
 
-var S={drive:{},nearOne:{},oneMsg:{},oneBusy:null,pos:null,map:loadMap(),places:[],form:null,delAsk:null,justSaved:false,backup:{open:false,code:'',msg:'',text:''},filtOpen:false,q:{text:'',cuisines:{},kinds:{},meals:{},budgets:{},openNow:false}};
+var S={nearOne:{},oneMsg:{},oneBusy:null,pos:null,map:loadMap(),places:[],form:null,delAsk:null,justSaved:false,backup:{open:false,code:'',msg:'',text:''},filtOpen:false,q:{text:'',cuisines:{},kinds:{},meals:{},budgets:{},openNow:false}};
 
 function esc(x){return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function $(id){return document.getElementById(id);}
