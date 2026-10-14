@@ -116,6 +116,8 @@ button{cursor:pointer}
 .edit{min-height:44px;padding:0 12px;border:1.5px solid var(--line);border-radius:8px;background:transparent;font-size:14px;font-weight:500}
 .empty{padding:16px 0;color:var(--ink-2);list-style:none}
 .form-title{font-size:18px;font-weight:900}
+.backup{border-top:1.5px solid var(--rule);padding-top:12px;display:flex;flex-direction:column;gap:10px}
+.ta{width:100%;padding:10px 12px;border:1.5px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit;font-size:13px;word-break:break-all;resize:vertical}
 .note{margin:0;font-size:12.5px;color:var(--ink-2);max-width:56ch}
 </style>
 </head>
@@ -125,6 +127,7 @@ button{cursor:pointer}
     <h1 class="brand"><span class="brand-main">今天吃啥</span><span class="brand-sub">Makan Apa?</span></h1>
   </header>
   <main id="main" style="display:flex;flex-direction:column;gap:18px"></main>
+  <div id="backup"></div>
   <p class="note">店的資料只存在這支手機的瀏覽器裡，清除瀏覽資料或換手機就會不見。</p>
 </div>
 
@@ -144,7 +147,7 @@ var BUDGET_ZH={low:'RM10 內',mid:'RM10–20',high:'RM20 以上'};
 var MAX_PLACES=60, MAX_DISHES=12;
 var KEY='makan-apa-places-v2';
 
-var S={places:[],form:null,delAsk:null,justSaved:false,filtOpen:false,q:{text:'',cuisines:{},kinds:{},meals:{},budgets:{}}};
+var S={places:[],form:null,delAsk:null,justSaved:false,backup:{open:false,code:'',msg:'',text:''},filtOpen:false,q:{text:'',cuisines:{},kinds:{},meals:{},budgets:{}}};
 
 function esc(x){return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function $(id){return document.getElementById(id);}
@@ -173,6 +176,24 @@ function load(){
 }
 function save(){
   try{localStorage.setItem(KEY,JSON.stringify({places:S.places}));}catch(e){}
+}
+var CODE_PREFIX='MAKAN1.';
+function makeCode(){return CODE_PREFIX+btoa(encodeURIComponent(JSON.stringify({places:S.places})));}
+function importCode(raw){
+  var t=(raw||'').replace(/\s+/g,''), data, names={}, added=0, skipped=0, i, c, src;
+  if(t.indexOf(CODE_PREFIX)!==0) return {err:'這不是備份碼。請完整貼上以 MAKAN1. 開頭的整段文字。'};
+  try{data=JSON.parse(decodeURIComponent(atob(t.slice(CODE_PREFIX.length))));}catch(e){return {err:'備份碼讀不出來，可能複製得不完整。'};}
+  if(!data||!Array.isArray(data.places)) return {err:'備份碼裡沒有店的資料。'};
+  S.places.forEach(function(p){names[p.name.toLowerCase()]=true;});
+  for(i=0;i<data.places.length;i++){
+    src=data.places[i];
+    if(src&&typeof src==='object'&&typeof src.id!=='string') src.id='x';
+    c=cleanPlace(src);
+    if(!c||names[c.name.toLowerCase()]||S.places.length>=MAX_PLACES){skipped++;continue;}
+    c.id='p'+Date.now().toString(36)+Math.floor(Math.random()*1e6).toString(36)+added;
+    names[c.name.toLowerCase()]=true; S.places.push(c); added++;
+  }
+  return {added:added,skipped:skipped};
 }
 function newForm(){return {id:null,name:'',cuisines:{},kinds:{},dishes:[],meals:{},budget:''};}
 function toMap(arr){var m={};(arr||[]).forEach(function(k){m[k]=true;});return m;}
@@ -274,6 +295,21 @@ function render(){
   }
   $('main').innerHTML=h;
   if(!first&&!S.form) refreshList();
+  renderBackup();
+}
+function renderBackup(){
+  var B=S.backup, h;
+  if(S.form&&S.places.length){$('backup').innerHTML='';return;}
+  h='<div class="backup" style="max-width:520px;margin:0 auto;padding:0 max(16px,env(safe-area-inset-left,0px))"><button type="button" class="link" data-act="togglebackup" aria-expanded="'+(B.open?'true':'false')+'">備份與還原 '+(B.open?'▲':'▼')+'</button>';
+  if(B.open){
+    h+='<p class="sub">換手機、用無痕模式、或從「加到主畫面」打開，都是另一份空的資料，不會自動帶過去。先在有店的那邊按「產生備份碼」，把整段文字傳給自己（例如 WhatsApp），再到新的地方貼上還原。</p>';
+    h+='<button type="button" class="btn btn-sm btn-ghost" data-act="makecode">產生備份碼</button>';
+    if(B.code) h+='<textarea class="ta" id="codeOut" rows="4" readonly aria-label="備份碼">'+esc(B.code)+'</textarea>';
+    h+='<textarea class="ta" id="restoreText" rows="3" placeholder="在這裡貼上備份碼" aria-label="貼上備份碼">'+esc(B.text)+'</textarea>';
+    h+='<button type="button" class="btn btn-sm btn-ghost" data-act="dorestore">還原（只會加入沒有的店，不會覆蓋現有的）</button>';
+    if(B.msg) h+='<p class="sub" role="status">'+esc(B.msg)+'</p>';
+  }
+  $('backup').innerHTML=h+'</div>';
 }
 function activeFilters(){
   var n=0;['cuisines','kinds','meals','budgets'].forEach(function(g){n+=Object.keys(S.q[g]).filter(function(k){return S.q[g][k];}).length;});
@@ -334,6 +370,20 @@ document.addEventListener('click',function(e){
   }
   if(el.hasAttribute('data-act')){
     v=el.getAttribute('data-act');
+    if(v==='togglebackup'){S.backup.open=!S.backup.open;renderBackup();return;}
+    if(v==='makecode'){
+      if(!S.places.length){S.backup.code='';S.backup.msg='還沒有店可以備份。';renderBackup();return;}
+      S.backup.code=makeCode(); S.backup.msg='請長按下面的文字，全選後複製。'; renderBackup();
+      try{navigator.clipboard.writeText(S.backup.code).then(function(){S.backup.msg='已複製備份碼。貼到你要保存的地方。';renderBackup();},function(){});}catch(e){}
+      return;
+    }
+    if(v==='dorestore'){
+      inp=importCode($('restoreText')?$('restoreText').value:'');
+      if(inp.err){S.backup.msg=inp.err;renderBackup();return;}
+      save(); S.backup.text=''; S.backup.code='';
+      S.backup.msg='已還原：新增 '+inp.added+' 間'+(inp.skipped?'，略過 '+inp.skipped+' 間（重複或不完整）':'')+'。';
+      S.form=null; render(); return;
+    }
     if(v==='togglefilter'){S.filtOpen=!S.filtOpen;render();return;}
     if(v==='clearall'){S.q={text:'',cuisines:{},kinds:{},meals:{},budgets:{}};render();return;}
     if(v==='add'){S.form=newForm();S.justSaved=false;render();if($('pfName'))$('pfName').focus();}
@@ -371,6 +421,7 @@ document.addEventListener('click',function(e){
 });
 document.addEventListener('input',function(e){
   if(S.form&&e.target&&e.target.id==='pfName') S.form.name=e.target.value;
+  if(e.target&&e.target.id==='restoreText') S.backup.text=e.target.value;
   if(!S.form&&e.target&&e.target.id==='qText'){S.q.text=e.target.value;refreshList();}
 });
 document.addEventListener('keydown',function(e){
@@ -396,6 +447,7 @@ document.addEventListener('submit',function(e){
 });
 
 load();
+try{if(navigator.storage&&navigator.storage.persist) navigator.storage.persist();}catch(e){}
 render();
 })();
 </script>
