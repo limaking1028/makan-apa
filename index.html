@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>今天吃啥 Makan Apa</title>
+<meta name="description" content="存下你常去的店，按時段、主食、預算快速找到今天要去哪一家。">
+<meta name="theme-color" content="#EAF1EC">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Noto+Sans+TC:wght@400;500;700;900&display=swap">
+<style>
+/* Layout: one phone-width column. A first-run screen asks for the places the person already eats at; afterwards the saved list leads. */
+:root{
+  --bg:#EAF1EC;
+  --surface:#F7FAF7;
+  --ink:#12301F;
+  --ink-2:#4A6354;
+  --line:#C5D4C9;
+  --rule:#12301F;
+  --tile:#DCE7DF;
+  --accent:#C93418;
+  --on-accent:#FFFFFF;
+  --focus:#1F7A4D;
+  --font-display:"Bricolage Grotesque","Noto Sans TC",system-ui,sans-serif;
+  --font-body:"Noto Sans TC","Bricolage Grotesque",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0E1913;--surface:#15251B;--ink:#E4EFE7;--ink-2:#9AB1A1;--line:#2B4034;--rule:#3E5B4A;--tile:#1B2D22;
+    --accent:#F0553A;--on-accent:#1A0B06;--focus:#6FD3A0;color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0E1913;--surface:#15251B;--ink:#E4EFE7;--ink-2:#9AB1A1;--line:#2B4034;--rule:#3E5B4A;--tile:#1B2D22;
+  --accent:#F0553A;--on-accent:#1A0B06;--focus:#6FD3A0;color-scheme:dark;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+
+.app{
+  max-width:520px;margin:0 auto;padding-block:18px 44px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+  display:flex;flex-direction:column;gap:18px;
+}
+.brand{margin:0;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.brand-main{font-family:var(--font-display);font-size:26px;font-weight:800;letter-spacing:-.015em;line-height:1.1}
+.brand-sub{font-family:var(--font-display);font-size:14px;font-weight:600;color:var(--ink-2)}
+
+.intro{margin:0;max-width:46ch}
+.intro strong{font-size:20px;font-weight:900;display:block;margin-bottom:4px;line-height:1.3}
+
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{
+  min-height:40px;padding:0 14px;border:1.5px solid var(--line);border-radius:8px;
+  background:transparent;font-size:14px;font-weight:500;line-height:1.2;
+}
+.chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.chip-sug{border-style:dashed}
+.chip-dish{background:var(--tile);border-color:var(--tile)}
+@media (hover:hover){.chip:hover{border-color:var(--ink-2)}.chip[aria-pressed="true"]:hover{border-color:var(--ink)}}
+
+.panel{background:var(--surface);border:1.5px solid var(--rule);border-radius:14px;padding:18px;min-width:0}
+.form{display:flex;flex-direction:column;gap:20px}
+.step{display:flex;flex-direction:column;gap:8px;min-width:0}
+.step-label{display:flex;align-items:baseline;gap:8px;font-size:15px;font-weight:700}
+.step-num{font-family:var(--font-display);font-size:13px;font-weight:800;color:var(--on-accent);background:var(--accent);border-radius:50%;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.hint{font-size:12.5px;font-weight:400;color:var(--ink-2)}
+.sub{margin:0;font-size:12.5px;color:var(--ink-2)}
+.input{width:100%;min-height:46px;padding:0 12px;border:1.5px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+.row{display:flex;gap:8px}
+.row .input{flex:1;min-width:0}
+.err{margin:0;color:var(--accent);font-size:13.5px;font-weight:500}
+.err:empty{display:none}
+
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:52px;padding:0 16px;
+  border-radius:10px;font-size:16px;font-weight:700;line-height:1.2;text-align:center;
+  border:2px solid var(--ink);background:transparent;color:var(--ink);
+}
+.btn-main{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn-sm{min-height:46px;font-size:14px;padding:0 14px;flex:none}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.actions.one{grid-template-columns:1fr}
+.link{
+  display:inline-flex;align-items:center;min-height:40px;padding:0;background:none;border:none;
+  font-size:14px;font-weight:500;text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--ink-2);
+}
+
+.list-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;border-top:1.5px solid var(--rule);padding-top:14px;font-size:13px;font-weight:700;letter-spacing:.06em}
+.plist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.place{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:14px 0;border-bottom:1px solid var(--line)}
+.place-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;align-items:flex-start;text-align:left;background:none;border:none;padding:0;min-height:44px}
+@media (hover:hover){.place-main:hover .place-name{text-decoration:underline;text-underline-offset:3px}}
+.place-name{font-size:18px;font-weight:700;line-height:1.3;overflow-wrap:anywhere}
+.place-meta{font-size:13px;color:var(--ink-2)}
+.place-dishes{font-size:14px;overflow-wrap:anywhere}
+.del{flex:none;min-width:44px;min-height:44px;border:1.5px solid var(--line);border-radius:8px;background:transparent;font-size:18px;line-height:1}
+.del.sure{color:var(--accent);border-color:var(--accent);font-size:13px;font-weight:700;padding:0 10px}
+.saved{margin:0;padding:8px 12px;border:2px solid var(--accent);border-radius:8px;color:var(--accent);font-weight:700;font-size:14px;align-self:flex-start;transform:rotate(-1.5deg)}
+.btn-ghost{border-color:var(--line)}
+.search{display:flex;flex-direction:column;gap:12px}
+.search-row{display:flex;gap:8px}
+.search-row .input{flex:1;min-width:0}
+.fgroups{display:flex;flex-direction:column;gap:14px;padding:14px;background:var(--surface);border:1.5px solid var(--line);border-radius:12px}
+.fgroup{display:flex;flex-direction:column;gap:8px}
+.fl{font-size:13px;font-weight:500;color:var(--ink-2)}
+.place-acts{display:flex;gap:6px;flex:none}
+.edit{min-height:44px;padding:0 12px;border:1.5px solid var(--line);border-radius:8px;background:transparent;font-size:14px;font-weight:500}
+.empty{padding:16px 0;color:var(--ink-2);list-style:none}
+.form-title{font-size:18px;font-weight:900}
+.note{margin:0;font-size:12.5px;color:var(--ink-2);max-width:56ch}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1 class="brand"><span class="brand-main">今天吃啥</span><span class="brand-sub">Makan Apa?</span></h1>
+  </header>
+  <main id="main" style="display:flex;flex-direction:column;gap:18px"></main>
+  <p class="note">店的資料只存在這支手機的瀏覽器裡，清除瀏覽資料或換手機就會不見。</p>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+var DISH_SUG={"rice":["椰漿飯","海南雞飯","咖哩拌飯","馬來雜菜飯","素食雜菜飯","蕉葉飯","瓦煲雞飯","印尼壓炸雞","甘榜炒飯","壽司"],"bread":["印度煎餅","印度薄餅","咖椰吐司","漢堡"],"noodle":["炒粿條","咖哩麵","板麵","福建麵","雲吞麵","叻沙","嘛嘛炒麵","炒美極麵","拉麵","義大利麵","米線"],"soup":["肉骨茶","火鍋","麻辣燙","牛骨湯","東炎湯","雞肉粥"],"snack":["沙嗲","煎蕊","紅豆冰","炸香蕉","曼煎糕","咖哩角"],"other":["雞扒","韓式炸雞","沙拉碗"]};
+var KINDS=['rice','noodle','bread','soup','snack','other'];
+var KIND_ZH={rice:'飯',noodle:'麵粉',bread:'餅·麵包',soup:'湯·粥',snack:'小吃·甜點',other:'其他'};
+var CUISINES=['malay','chinese','hk','indian','thai','japanese','korean','western','viet','other'];
+var CUISINE_ZH={malay:'馬來·印尼',chinese:'華人',hk:'港式',indian:'印度·嘛嘛',thai:'泰式',japanese:'日式',korean:'韓式',western:'西式',viet:'越南',other:'其他'};
+var MEALS=['b','l','t','d','s'];
+var MEAL_ZH={b:'早餐',l:'午餐',t:'下午茶',d:'晚餐',s:'宵夜'};
+var BUDGETS=['low','mid','high'];
+var BUDGET_ZH={low:'RM10 內',mid:'RM10–20',high:'RM20 以上'};
+var MAX_PLACES=60, MAX_DISHES=12;
+var KEY='makan-apa-places-v2';
+
+var S={places:[],form:null,delAsk:null,justSaved:false,filtOpen:false,q:{text:'',cuisines:{},kinds:{},meals:{},budgets:{}}};
+
+function esc(x){return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function $(id){return document.getElementById(id);}
+
+/* ---------- data ---------- */
+function cleanPlace(p){
+  var kinds, meals, dishes, cuisines, seen={};
+  if(!p||typeof p!=='object'||typeof p.id!=='string'||typeof p.name!=='string') return null;
+  kinds=Array.isArray(p.kinds)?p.kinds.filter(function(k){return KINDS.indexOf(k)>-1;}):[];
+  cuisines=Array.isArray(p.cuisines)?p.cuisines.filter(function(k){return CUISINES.indexOf(k)>-1;}):[];
+  meals=Array.isArray(p.meals)?p.meals.filter(function(k){return MEALS.indexOf(k)>-1;}):[];
+  dishes=Array.isArray(p.dishes)?p.dishes.filter(function(x){
+    var k;
+    if(typeof x!=='string') return false;
+    x=x.trim(); k=x.toLowerCase();
+    if(!x||x.length>30||seen[k]) return false;
+    seen[k]=true; return true;
+  }).map(function(x){return x.trim();}).slice(0,MAX_DISHES):[];
+  if(!p.name.trim()||!kinds.length||!meals.length||BUDGETS.indexOf(p.budget)<0||!dishes.length) return null;
+  return {id:p.id.slice(0,24),name:p.name.trim().slice(0,40),cuisines:cuisines,kinds:kinds,meals:meals,budget:p.budget,dishes:dishes};
+}
+function load(){
+  var raw=null;
+  try{raw=JSON.parse(localStorage.getItem(KEY)||'null');}catch(e){raw=null;}
+  if(raw&&Array.isArray(raw.places)) S.places=raw.places.map(cleanPlace).filter(Boolean).slice(0,MAX_PLACES);
+}
+function save(){
+  try{localStorage.setItem(KEY,JSON.stringify({places:S.places}));}catch(e){}
+}
+function newForm(){return {id:null,name:'',cuisines:{},kinds:{},dishes:[],meals:{},budget:''};}
+function toMap(arr){var m={};(arr||[]).forEach(function(k){m[k]=true;});return m;}
+function formFromPlace(p){return {id:p.id,name:p.name,cuisines:toMap(p.cuisines),kinds:toMap(p.kinds),dishes:p.dishes.slice(),meals:toMap(p.meals),budget:p.budget};}
+
+function addPlace(f){
+  var name=(f.name||'').trim().slice(0,40), cuisines=CUISINES.filter(function(k){return f.cuisines[k];}), kinds=KINDS.filter(function(k){return f.kinds[k];}),
+      meals=MEALS.filter(function(k){return f.meals[k];}), i, p;
+  if(!name) return {err:'請輸入店名。'};
+  if(!cuisines.length) return {err:'請至少選一個種類。'};
+  if(!kinds.length) return {err:'請至少選一種主食。'};
+  if(!f.dishes.length) return {err:'請至少加入一樣這間店有的食物。'};
+  if(!meals.length) return {err:'請至少選一個你會去的時段。'};
+  if(BUDGETS.indexOf(f.budget)<0) return {err:'請選一個預算。'};
+  if(!f.id&&S.places.length>=MAX_PLACES) return {err:'最多存 '+MAX_PLACES+' 間店。'};
+  for(i=0;i<S.places.length;i++) if(S.places[i].id!==f.id&&S.places[i].name.toLowerCase()===name.toLowerCase()) return {err:'這間店已經存過了。'};
+  if(f.id){
+    for(i=0;i<S.places.length;i++) if(S.places[i].id===f.id){
+      S.places[i]={id:f.id,name:name,cuisines:cuisines,kinds:kinds,meals:meals,budget:f.budget,dishes:f.dishes.slice(0,MAX_DISHES)};
+      return {place:S.places[i]};
+    }
+    return {err:'找不到這間店。'};
+  }
+  p={id:'p'+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36),name:name,cuisines:cuisines,kinds:kinds,meals:meals,budget:f.budget,dishes:f.dishes.slice(0,MAX_DISHES)};
+  S.places.push(p);
+  return {place:p};
+}
+function addDish(f,raw){
+  var x=(raw||'').trim().slice(0,30), k=x.toLowerCase(), i;
+  if(!x) return false;
+  for(i=0;i<f.dishes.length;i++) if(f.dishes[i].toLowerCase()===k) return false;
+  if(f.dishes.length>=MAX_DISHES) return false;
+  f.dishes.push(x); return true;
+}
+
+/* ---------- render ---------- */
+function chip(attr,val,label,on,extra){
+  return '<button type="button" class="chip'+(extra?' '+extra:'')+'" '+attr+'="'+esc(val)+'" aria-pressed="'+(on?'true':'false')+'">'+esc(label)+'</button>';
+}
+function dishAreaHtml(){
+  var F=S.form, h='';
+  if(F.dishes.length) h+='<div class="chips">'+F.dishes.map(function(x,i){
+    return '<button type="button" class="chip chip-dish" data-rmdish="'+i+'" aria-label="移除 '+esc(x)+'">'+esc(x)+' ×</button>';
+  }).join('')+'</div>';
+  return h;
+}
+function sugAreaHtml(){
+  var F=S.form, have={}, list=[], h;
+  F.dishes.forEach(function(x){have[x.toLowerCase()]=true;});
+  KINDS.forEach(function(k){
+    if(!F.kinds[k]) return;
+    (DISH_SUG[k]||[]).forEach(function(x){if(!have[x.toLowerCase()]&&list.indexOf(x)<0) list.push(x);});
+  });
+  if(!list.length) return '';
+  h='<p class="sub">點一下加入，或在上面自己輸入：</p><div class="chips">'+list.map(function(x){
+    return '<button type="button" class="chip chip-sug" data-sugdish="'+esc(x)+'">+ '+esc(x)+'</button>';
+  }).join('')+'</div>';
+  return h;
+}
+function formHtml(first){
+  var F=S.form, h='';
+  h+='<form class="panel form" id="pform" novalidate>';
+  if(F.id) h+='<div class="form-title">編輯這間店</div>';
+  h+='<div class="step"><label class="step-label" for="pfName"><span class="step-num">1</span>店名</label><input class="input" id="pfName" maxlength="40" autocomplete="off" value="'+esc(F.name)+'"></div>';
+  h+='<div class="step"><div class="step-label"><span class="step-num">2</span>種類<span class="hint">可多選</span></div><div class="chips">'+
+     CUISINES.map(function(k){return chip('data-cuisine',k,CUISINE_ZH[k],F.cuisines[k]);}).join('')+'</div></div>';
+  h+='<div class="step"><div class="step-label"><span class="step-num">3</span>主食<span class="hint">可多選</span></div><div class="chips">'+
+     KINDS.map(function(k){return chip('data-kind',k,KIND_ZH[k],F.kinds[k]);}).join('')+'</div></div>';
+  h+='<div class="step"><label class="step-label" for="pfDish"><span class="step-num">4</span>這間店有什麼吃<span class="hint">你會點的</span></label>'+
+     '<div class="row"><input class="input" id="pfDish" maxlength="30" autocomplete="off" enterkeyhint="done" placeholder="例如：海南雞飯"><button type="button" class="btn btn-sm" data-act="adddish">加入</button></div>'+
+     '<div id="dishArea" aria-live="polite">'+dishAreaHtml()+'</div><div id="sugArea">'+sugAreaHtml()+'</div></div>';
+  h+='<div class="step"><div class="step-label"><span class="step-num">5</span>你會在什麼時段去<span class="hint">可多選</span></div><div class="chips">'+
+     MEALS.map(function(k){return chip('data-meal',k,MEAL_ZH[k],F.meals[k]);}).join('')+'</div></div>';
+  h+='<div class="step"><div class="step-label"><span class="step-num">6</span>預算<span class="hint">每人</span></div><div class="chips">'+
+     BUDGETS.map(function(k){return chip('data-budget',k,BUDGET_ZH[k],F.budget===k);}).join('')+'</div></div>';
+  h+='<p class="err" id="pfErr" role="alert"></p>';
+  h+='<div class="actions'+(first?' one':'')+'">'+(first?'':'<button type="button" class="btn" data-act="cancel">取消</button>')+'<button type="submit" class="btn btn-main">'+(F.id?'儲存修改':'儲存這間店')+'</button></div>';
+  return h+'</form>';
+}
+function rowHtml(p){
+  var meta=[(p.cuisines||[]).map(function(k){return CUISINE_ZH[k];}).join('、'), p.meals.map(function(k){return MEAL_ZH[k];}).join('、'), p.kinds.map(function(k){return KIND_ZH[k];}).join('、'), BUDGET_ZH[p.budget]].filter(Boolean).join(' · ');
+  return '<li class="place"><button type="button" class="place-main" data-edit="'+esc(p.id)+'" aria-label="編輯 '+esc(p.name)+'"><span class="place-name">'+esc(p.name)+'</span><span class="place-meta">'+esc(meta)+'</span><span class="place-dishes">'+esc(p.dishes.join('、'))+'</span></button>'+
+    '<div class="place-acts">'+
+    (S.delAsk===p.id?'<button type="button" class="del sure" data-del="'+esc(p.id)+'">確定刪除</button>':'<button type="button" class="del" data-del="'+esc(p.id)+'" aria-label="刪除 '+esc(p.name)+'">×</button>')+'</div></li>';
+}
+function render(){
+  var h='', first=!S.places.length;
+  if(first){
+    if(!S.form) S.form=newForm();
+    h+='<p class="intro"><strong>先輸入你吃過、還會再去的店</strong>每間店填五樣：店名、主食、有什麼吃、你會去的時段、預算。先存一間就可以開始，越多越好。</p>';
+    h+=formHtml(true);
+  }else if(S.form){
+    h+=formHtml(false);
+  }else{
+    if(S.justSaved) h+='<p class="saved">已存好</p>';
+    h+='<button type="button" class="btn btn-main" data-act="add">+ 再新增一間店</button>';
+    h+=searchHtml();
+    h+='<div class="list-head"><span id="qCount"></span><button type="button" class="link" id="qClear" data-act="clearall" hidden>清除搜尋</button></div><ul class="plist" id="listArea"></ul>';
+  }
+  $('main').innerHTML=h;
+  if(!first&&!S.form) refreshList();
+}
+function activeFilters(){
+  var n=0;['cuisines','kinds','meals','budgets'].forEach(function(g){n+=Object.keys(S.q[g]).filter(function(k){return S.q[g][k];}).length;});
+  return n;
+}
+function fgroup(label,attr,group,keys,names){
+  return '<div class="fgroup"><div class="fl">'+label+'</div><div class="chips">'+keys.map(function(k){return chip(attr,k,names[k],S.q[group][k]);}).join('')+'</div></div>';
+}
+function searchHtml(){
+  var n=activeFilters(), h='<div class="search"><div class="search-row"><input class="input" id="qText" type="search" placeholder="搜尋店名或食物" autocomplete="off" value="'+esc(S.q.text)+'">'+
+    '<button type="button" class="btn btn-sm btn-ghost" data-act="togglefilter" aria-expanded="'+(S.filtOpen?'true':'false')+'">篩選'+(n?' · '+n:'')+'</button></div>';
+  if(S.filtOpen){
+    h+='<div class="fgroups">'+fgroup('種類','data-fc','cuisines',CUISINES,CUISINE_ZH)+fgroup('主食','data-fk','kinds',KINDS,KIND_ZH)+
+       fgroup('時段','data-fm','meals',MEALS,MEAL_ZH)+fgroup('預算','data-fb','budgets',BUDGETS,BUDGET_ZH)+'</div>';
+  }
+  return h+'</div>';
+}
+function anyOf(map,arr){
+  var ks=Object.keys(map).filter(function(k){return map[k];});
+  if(!ks.length) return true;
+  return arr.some(function(a){return map[a];});
+}
+function matches(p){
+  var q=S.q, t=q.text.trim().toLowerCase();
+  if(t&&p.name.toLowerCase().indexOf(t)<0&&!p.dishes.some(function(d){return d.toLowerCase().indexOf(t)>-1;})) return false;
+  return anyOf(q.cuisines,p.cuisines||[])&&anyOf(q.kinds,p.kinds)&&anyOf(q.meals,p.meals)&&anyOf(q.budgets,[p.budget]);
+}
+function refreshList(){
+  var arr=S.places.filter(matches), searching=!!(S.q.text.trim()||activeFilters());
+  $('qClear').hidden=!searching;
+  $('qCount').textContent=searching?'符合 '+arr.length+' / '+S.places.length+' 間':'我的店 · '+S.places.length;
+  $('listArea').innerHTML=arr.length?arr.map(rowHtml).join(''):'<li class="empty">沒有符合的店。<button type="button" class="link" data-act="clearall">清除搜尋</button></li>';
+}
+
+/* ---------- events ---------- */
+document.addEventListener('click',function(e){
+  var el=e.target&&e.target.closest?e.target.closest('[data-act],[data-cuisine],[data-kind],[data-meal],[data-budget],[data-sugdish],[data-rmdish],[data-del],[data-edit],[data-fc],[data-fk],[data-fm],[data-fb]'):null, v, F=S.form, inp;
+  if(S.delAsk&&!(el&&el.hasAttribute('data-del'))){S.delAsk=null;render();}
+  if(!el) return;
+  if(el.hasAttribute('data-del')){
+    v=el.getAttribute('data-del');
+    if(S.delAsk!==v){S.delAsk=v;render();return;}
+    S.delAsk=null; S.places=S.places.filter(function(p){return p.id!==v;});
+    save(); if(!S.places.length) S.form=newForm();
+    render(); return;
+  }
+  if(el.hasAttribute('data-edit')){
+    v=el.getAttribute('data-edit');
+    S.delAsk=null;
+    S.places.forEach(function(p){if(p.id===v) S.form=formFromPlace(p);});
+    if(S.form){S.justSaved=false;render();window.scrollTo(0,0);if($('pfName'))$('pfName').focus();}
+    return;
+  }
+  v=el.hasAttribute('data-fc')?'cuisines':el.hasAttribute('data-fk')?'kinds':el.hasAttribute('data-fm')?'meals':el.hasAttribute('data-fb')?'budgets':'';
+  if(v){
+    inp=el.getAttribute(v==='cuisines'?'data-fc':v==='kinds'?'data-fk':v==='meals'?'data-fm':'data-fb');
+    S.q[v][inp]=!S.q[v][inp]; render(); return;
+  }
+  if(el.hasAttribute('data-act')){
+    v=el.getAttribute('data-act');
+    if(v==='togglefilter'){S.filtOpen=!S.filtOpen;render();return;}
+    if(v==='clearall'){S.q={text:'',cuisines:{},kinds:{},meals:{},budgets:{}};render();return;}
+    if(v==='add'){S.form=newForm();S.justSaved=false;render();if($('pfName'))$('pfName').focus();}
+    else if(v==='cancel'){S.form=null;render();window.scrollTo(0,0);}
+    else if(v==='adddish'&&F){
+      inp=$('pfDish'); if(addDish(F,inp.value)){inp.value='';$('dishArea').innerHTML=dishAreaHtml();$('sugArea').innerHTML=sugAreaHtml();}
+      inp.focus();
+    }
+    return;
+  }
+  if(!F) return;
+  if(el.hasAttribute('data-cuisine')){
+    v=el.getAttribute('data-cuisine'); F.cuisines[v]=!F.cuisines[v];
+    el.setAttribute('aria-pressed',F.cuisines[v]?'true':'false'); return;
+  }
+  if(el.hasAttribute('data-kind')){
+    v=el.getAttribute('data-kind'); F.kinds[v]=!F.kinds[v];
+    el.setAttribute('aria-pressed',F.kinds[v]?'true':'false'); $('sugArea').innerHTML=sugAreaHtml(); return;
+  }
+  if(el.hasAttribute('data-meal')){
+    v=el.getAttribute('data-meal'); F.meals[v]=!F.meals[v];
+    el.setAttribute('aria-pressed',F.meals[v]?'true':'false'); return;
+  }
+  if(el.hasAttribute('data-budget')){
+    F.budget=el.getAttribute('data-budget');
+    Array.prototype.forEach.call(document.querySelectorAll('[data-budget]'),function(b){b.setAttribute('aria-pressed',b.getAttribute('data-budget')===F.budget?'true':'false');});
+    return;
+  }
+  if(el.hasAttribute('data-sugdish')){
+    addDish(F,el.getAttribute('data-sugdish')); $('dishArea').innerHTML=dishAreaHtml(); $('sugArea').innerHTML=sugAreaHtml(); return;
+  }
+  if(el.hasAttribute('data-rmdish')){
+    F.dishes.splice(parseInt(el.getAttribute('data-rmdish'),10),1); $('dishArea').innerHTML=dishAreaHtml(); $('sugArea').innerHTML=sugAreaHtml(); return;
+  }
+});
+document.addEventListener('input',function(e){
+  if(S.form&&e.target&&e.target.id==='pfName') S.form.name=e.target.value;
+  if(!S.form&&e.target&&e.target.id==='qText'){S.q.text=e.target.value;refreshList();}
+});
+document.addEventListener('keydown',function(e){
+  var inp;
+  if(e.key==='Enter'&&e.target&&e.target.id==='pfDish'&&S.form){
+    e.preventDefault(); inp=e.target;
+    if(addDish(S.form,inp.value)){inp.value='';$('dishArea').innerHTML=dishAreaHtml();$('sugArea').innerHTML=sugAreaHtml();}
+  }
+});
+document.addEventListener('submit',function(e){
+  var f=e.target, r, pending;
+  if(!f||f.id!=='pform'||!S.form) return;
+  e.preventDefault();
+  S.form.name=$('pfName').value;
+  pending=$('pfDish').value; /* typed but not yet added: add it for the person */
+  if(pending.trim()) addDish(S.form,pending);
+  r=addPlace(S.form);
+  if(r.err){
+    $('dishArea').innerHTML=dishAreaHtml(); $('sugArea').innerHTML=sugAreaHtml(); $('pfDish').value='';
+    $('pfErr').textContent=r.err; return;
+  }
+  save(); S.form=null; S.justSaved=true; render(); window.scrollTo(0,0);
+});
+
+load();
+render();
+})();
+</script>
+<noscript><p style="padding:16px">這個網頁需要開啟 JavaScript 才能使用。</p></noscript>
+<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});}</script>
+</body>
+</html>
