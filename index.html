@@ -161,6 +161,10 @@ button{cursor:pointer}
 .foodrow{display:flex;gap:6px;margin-top:6px}
 .foodrow img{width:44px;height:44px;border-radius:6px;object-fit:cover;display:block}
 .note{margin:0;font-size:12.5px;color:var(--ink-2);max-width:56ch}
+.acct-form{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.acct-btns{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:8px}
+.btn-danger{color:var(--accent);border-color:var(--accent);background:transparent}
+.hint-login{margin:0 0 12px}
 </style>
 </head>
 <body>
@@ -169,7 +173,7 @@ button{cursor:pointer}
     <h1 class="brand"><span class="brand-main">今天吃啥</span><span class="brand-sub">Makan Apa?</span></h1>
   </header>
   <main id="main" style="display:flex;flex-direction:column;gap:18px"></main>
-  <div id="backup"></div>
+  <div id="account"></div>
   <p class="note">店的資料只存在這支手機的瀏覽器裡，清除瀏覽資料或換手機就會不見。</p>
 </div>
 
@@ -186,7 +190,8 @@ var MEAL_ZH={b:'早餐',l:'午餐',t:'下午茶',d:'晚餐',s:'宵夜'};
 var BUDGETS=['low','mid','high'];
 var BUDGET_ZH={low:'RM10 內',mid:'RM10–20',high:'RM20 以上'};
 var MAX_PLACES=60, MAX_DISHES=12, MAX_BRANCHES=10;
-var KEY='makan-apa-places-v2', MAPKEY='makan-apa-map-v1';
+var KEY='makan-apa-places-v2', MAPKEY='makan-apa-map-v1', AUTHKEY='makan-apa-auth-v1';
+var CLOUD={url:'https://mhxskgtxzbxcpkkdnjkp.supabase.co',key:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1oeHNrZ3R4emJ4Y3Bra2RuamtwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNjkxODksImV4cCI6MjEwNzY0NTE4OX0.QqSIWHHD0IshE221xtAxBk6Bu6h30v2qGPgtxGvCvQg'};
 var MAPS=['google','waze','apple'], MAP_ZH={google:'Google 地圖',waze:'Waze',apple:'Apple 地圖'};
 function cleanAddr(a){return typeof a==='string'?a.replace(/\s+/g,' ').trim().slice(0,120):'';}
 function mapUrl(a){var q=encodeURIComponent(a);return S.map==='waze'?'https://waze.com/ul?q='+q+'&navigate=yes':S.map==='apple'?'https://maps.apple.com/?q='+q:'https://www.google.com/maps/search/?api=1&query='+q;}
@@ -358,7 +363,7 @@ function readPhoto(file,cb,side,quality){
   img.src=url;
 }
 
-var S={nearOne:{},oneMsg:{},oneBusy:null,pos:null,map:loadMap(),places:[],form:null,delAsk:null,justSaved:false,backup:{open:false,code:'',msg:'',text:''},filtOpen:false,q:{text:'',cuisines:{},kinds:{},meals:{},budgets:{},openNow:false}};
+var S={nearOne:{},auth:null,tomb:[],sy:{},owner:'',sync:{busy:false,err:'',last:0,again:false},acct:{open:false,mode:'login',msg:'',email:'',busy:false,delAsk:false,confirmOut:false},oneMsg:{},oneBusy:null,pos:null,map:loadMap(),places:[],form:null,delAsk:null,justSaved:false,filtOpen:false,q:{text:'',cuisines:{},kinds:{},meals:{},budgets:{},openNow:false}};
 
 function esc(x){return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function $(id){return document.getElementById(id);}
@@ -378,37 +383,291 @@ function cleanPlace(p){
     seen[k]=true; return true;
   }).map(function(x){return x.trim();}).slice(0,MAX_DISHES):[];
   if(!p.name.trim()||!kinds.length||!meals.length||BUDGETS.indexOf(p.budget)<0||!dishes.length) return null;
-  return {id:p.id.slice(0,24),name:p.name.trim().slice(0,40),cuisines:cuisines,kinds:kinds,meals:meals,budget:p.budget,dishes:dishes,photo:cleanPhoto(p.photo),foods:cleanFoods(p.foods),hours:cleanHours(p.hours),branches:cleanBranches(p)};
+  return {id:p.id.slice(0,24),name:p.name.trim().slice(0,40),cuisines:cuisines,kinds:kinds,meals:meals,budget:p.budget,dishes:dishes,photo:cleanPhoto(p.photo),foods:cleanFoods(p.foods),hours:cleanHours(p.hours),branches:cleanBranches(p),u:(typeof p.u==='number'&&isFinite(p.u)&&p.u>0)?Math.floor(p.u):0};
+}
+/* ---------- cloud account + sync (Supabase REST, no library) ---------- */
+function cloudOn(){return !!(CLOUD.url&&CLOUD.key);}
+function api(path,o,cb){
+  var h={apikey:CLOUD.key,'Content-Type':'application/json','Authorization':'Bearer '+(o.token||CLOUD.key)}, k, ctl=window.AbortController?new AbortController():null, t, init;
+  if(o.headers) for(k in o.headers) h[k]=o.headers[k];
+  t=setTimeout(function(){if(ctl) ctl.abort();},o.timeout||20000);
+  init={method:o.method||'GET',headers:h};
+  if(ctl) init.signal=ctl.signal;
+  if(o.body!==undefined) init.body=JSON.stringify(o.body);
+  fetch(CLOUD.url+path,init).then(function(r){
+    return r.text().then(function(tx){var j=null;try{j=tx?JSON.parse(tx):null;}catch(e){}clearTimeout(t);cb(r.status,j);});
+  }).catch(function(){clearTimeout(t);cb(0,null);});
+}
+function authErr(st,j){
+  var m=(j&&(j.msg||j.error_description||j.message||j.error))||'';
+  if(st===0) return '連不上網路，請檢查網路後再試。';
+  if(/invalid login/i.test(m)) return 'Email 或密碼不對。';
+  if(/already registered|already been registered/i.test(m)) return '這個 Email 已經註冊過了，請改按「登入」。';
+  if(/password.*(at least|short|weak)/i.test(m)) return '密碼太簡單或太短，請用至少 8 個字。';
+  if(/valid email|invalid.*email|email.*invalid/i.test(m)) return 'Email 格式不對。';
+  if(/rate limit|too many|security purposes/i.test(m)) return '操作太頻繁，請等一分鐘再試。';
+  if(/not confirmed/i.test(m)) return '這個 Email 還沒確認，請先到信箱點確認連結。';
+  return '沒有成功（'+st+'）。請稍後再試。';
+}
+function saveAuth(){try{if(S.auth) localStorage.setItem(AUTHKEY,JSON.stringify(S.auth)); else localStorage.removeItem(AUTHKEY);}catch(e){}}
+function loadAuth(){
+  var a=null;
+  try{a=JSON.parse(localStorage.getItem(AUTHKEY)||'null');}catch(e){a=null;}
+  return (a&&typeof a.access==='string'&&typeof a.refresh==='string'&&typeof a.uid==='string')?a:null;
+}
+function setSession(j,email){
+  var u=j.user||{};
+  S.auth={access:j.access_token,refresh:j.refresh_token,exp:Date.now()+((j.expires_in||3600)*1000)-60000,uid:u.id||(S.auth&&S.auth.uid)||'',email:u.email||email||(S.auth&&S.auth.email)||''};
+  saveAuth();
+}
+function validToken(cb){
+  if(!S.auth){cb(null);return;}
+  if(Date.now()<S.auth.exp){cb(S.auth.access);return;}
+  api('/auth/v1/token?grant_type=refresh_token',{method:'POST',body:{refresh_token:S.auth.refresh}},function(st,j){
+    if(st===200&&j&&j.access_token){setSession(j);cb(S.auth.access);return;}
+    if(st===400||st===401||st===403){S.auth=null;saveAuth();S.acct.msg='登入已過期，請重新登入。你手機上的店還在。';S.acct.open=true;renderAccount();}
+    cb(null);
+  });
+}
+function persist(){
+  try{localStorage.setItem(KEY,JSON.stringify({places:S.places,tomb:S.tomb,owner:S.owner,sy:S.sy}));return true;}catch(e){return false;}
+}
+var syncTimer=null;
+function scheduleSync(){
+  if(!cloudOn()||!S.auth) return;
+  clearTimeout(syncTimer); syncTimer=setTimeout(syncNow,1500);
+}
+function pendingCount(){
+  var n=S.tomb.length;
+  S.places.forEach(function(p){if(S.sy[p.id]===undefined||S.sy[p.id]<(p.u||0)) n++;});
+  return n;
+}
+function syncMsgText(){
+  var s=S.sync;
+  if(s.busy) return '同步中…';
+  if(s.err) return s.err;
+  if(s.last) return '已同步（'+new Date(s.last).toTimeString().slice(0,5)+'）';
+  return '';
+}
+function accUi(){var e=$('syncMsg');if(e) e.textContent=syncMsgText();var b=$('syncBtn');if(b) b.disabled=!!S.sync.busy;}
+function mergeRemote(rows){
+  var byId={}, changed=false, names={}, keep=[], now=Date.now();
+  S.places.forEach(function(p){byId[p.id]=p;});
+  rows.forEach(function(r){
+    var l=byId[r.id], ru=Number(r.u)||0, tb=null, c, i;
+    for(i=0;i<S.tomb.length;i++) if(S.tomb[i].id===r.id) tb=S.tomb[i];
+    if(r.deleted){
+      if(l&&(l.u||0)<=ru){delete byId[r.id];changed=true;}
+      if(tb&&tb.u<=ru) S.tomb=S.tomb.filter(function(x){return x!==tb;});
+      if(!l||(l.u||0)<=ru) S.sy[r.id]=ru;
+      return;
+    }
+    if(tb&&tb.u>ru) return;           /* deleted here after the cloud copy: the delete is pushed below */
+    if(tb) S.tomb=S.tomb.filter(function(x){return x!==tb;});
+    if(!l||ru>(l.u||0)){
+      c=cleanPlace(Object.assign({},r.data||{},{id:r.id,u:ru}));
+      if(c){byId[r.id]=c;S.sy[r.id]=ru;changed=true;}
+    }else if(ru===(l.u||0)) S.sy[r.id]=ru;
+  });
+  keep=Object.keys(byId).map(function(k){return byId[k];});
+  /* same shop name from two devices: keep the newer one */
+  keep.sort(function(a,b){return (b.u||0)-(a.u||0);});
+  keep=keep.filter(function(p){
+    var k=p.name.toLowerCase();
+    if(names[k]){S.tomb.push({id:p.id,u:now});changed=true;return false;}
+    names[k]=true; return true;
+  });
+  if(keep.length>MAX_PLACES) keep=keep.slice(0,MAX_PLACES);
+  /* keep the original list order for places that were already here */
+  if(changed){
+    var order={}; S.places.forEach(function(p,i){order[p.id]=i;});
+    keep.sort(function(a,b){var x=order[a.id],y=order[b.id];return (x===undefined?1e9:x)-(y===undefined?1e9:y);});
+    S.places=keep;
+  }
+  return changed;
+}
+function pushChanges(tok,done){
+  var items=[], marks=[], i, chunks=[], k=0;
+  S.places.forEach(function(p){
+    if(S.sy[p.id]===undefined||S.sy[p.id]<(p.u||0)){items.push({user_id:S.auth.uid,id:p.id,data:p,u:p.u||0,deleted:false});marks.push({id:p.id,u:p.u||0,tomb:false});}
+  });
+  S.tomb.forEach(function(t){items.push({user_id:S.auth.uid,id:t.id,data:{},u:t.u,deleted:true});marks.push({id:t.id,u:t.u,tomb:true});});
+  for(i=0;i<items.length;i+=6) chunks.push({it:items.slice(i,i+6),mk:marks.slice(i,i+6)});
+  function next(){
+    var c=chunks[k];
+    if(!c){done(true);return;}
+    api('/rest/v1/places?on_conflict=user_id,id',{method:'POST',token:tok,headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:c.it,timeout:60000},function(st){
+      if(st<200||st>=300){done(false,st);return;}
+      c.mk.forEach(function(m){
+        S.sy[m.id]=m.u;
+        if(m.tomb) S.tomb=S.tomb.filter(function(t){return !(t.id===m.id&&t.u<=m.u);});
+      });
+      persist(); k++; next();
+    });
+  }
+  next();
+}
+function syncNow(){
+  var hadPlaces;
+  if(!cloudOn()||!S.auth) return;
+  if(S.sync.busy){S.sync.again=true;return;}
+  S.sync.busy=true; S.sync.err=''; accUi();
+  function fin(err){
+    S.sync.busy=false; S.sync.err=err||''; if(!err) S.sync.last=Date.now();
+    accUi();
+    if(S.sync.again){S.sync.again=false;setTimeout(syncNow,300);}
+  }
+  hadPlaces=S.places.length>0;
+  validToken(function(tok){
+    if(!tok){fin('現在連不上雲端，之後會自動再試。');return;}
+    api('/rest/v1/places?select=id,data,u,deleted&user_id=eq.'+encodeURIComponent(S.auth.uid)+'&limit=1000',{token:tok,timeout:60000},function(st,rows){
+      var changed;
+      if(st!==200||!Array.isArray(rows)){fin(st===0?'現在連不上雲端，之後會自動再試。':'同步失敗（'+st+'），之後會自動再試。');return;}
+      changed=mergeRemote(rows);
+      persist();
+      if(changed){
+        if(!hadPlaces&&S.places.length) S.form=null;
+        if(!S.form) render();
+      }
+      pushChanges(tok,function(ok,code){
+        fin(ok?'':'上傳失敗（'+(code||'網路')+'），之後會自動再試。');
+      });
+    });
+  });
+}
+function afterAuth(){
+  if(S.owner&&S.owner!==S.auth.uid){S.places=[];S.tomb=[];S.sy={};}   /* local data belonged to a different account */
+  S.owner=S.auth.uid; persist();
+  S.acct.msg=''; S.acct.mode='login'; S.acct.delAsk=false;
+  renderAccount();
+  syncNow();
+}
+function wipeLocal(){
+  S.places=[];S.tomb=[];S.sy={};S.owner='';S.form=null;S.sync={busy:false,err:'',last:0,again:false};
+  persist();
+}
+function signOutLocal(msg){
+  S.auth=null; saveAuth(); wipeLocal(); S.acct.msg=msg||''; S.acct.open=true; S.acct.delAsk=false; S.acct.confirmOut=false;
+  render();
+}
+function doSignOut(){
+  var tok=S.auth&&S.auth.access;
+  if(tok) api('/auth/v1/logout',{method:'POST',token:tok},function(){});
+  signOutLocal('已登出。這支手機上的資料已清空，雲端的資料還在。');
+}
+function acctAct(v){
+  var A=S.acct, em, pw;
+  if(v==='acctoggle'){A.open=!A.open;renderAccount();return true;}
+  if(v==='acctopen'){A.open=true;renderAccount();var e=$('account');if(e&&e.scrollIntoView) e.scrollIntoView({block:'center'});return true;}
+  if(v==='login'||v==='signup'||v==='forgot'||v==='savepw'){
+    if(A.busy) return true;
+    em=($('acEmail')&&$('acEmail').value||A.email||'').trim(); A.email=em;
+    pw=$('acPass')?$('acPass').value:'';
+    if(v==='savepw'){
+      pw=$('acNew')?$('acNew').value:'';
+      if(pw.length<8){A.msg='新密碼至少要 8 個字。';renderAccount();return true;}
+      A.busy=true;A.msg='';renderAccount();
+      validToken(function(tok){
+        api('/auth/v1/user',{method:'PUT',token:tok,body:{password:pw}},function(st,j){
+          A.busy=false;
+          if(st===200){A.mode='login';A.msg='新密碼已設好。';renderAccount();syncNow();}
+          else{A.msg=authErr(st,j);renderAccount();}
+        });
+      });
+      return true;
+    }
+    if(!em||em.indexOf('@')<1){A.msg='請輸入 Email。';renderAccount();return true;}
+    if(v==='forgot'){
+      A.busy=true;A.msg='';renderAccount();
+      api('/auth/v1/recover?redirect_to='+encodeURIComponent(location.href.split('#')[0]),{method:'POST',body:{email:em}},function(st,j){
+        A.busy=false;A.msg=(st===200)?'如果這個 Email 有註冊，重設密碼的信已經寄出，請到信箱點連結。':authErr(st,j);renderAccount();
+      });
+      return true;
+    }
+    if(pw.length<8){A.msg='密碼至少要 8 個字。';renderAccount();return true;}
+    A.busy=true;A.msg='';renderAccount();
+    api(v==='login'?'/auth/v1/token?grant_type=password':'/auth/v1/signup',{method:'POST',body:{email:em,password:pw}},function(st,j){
+      A.busy=false;
+      if((st===200||st===201)&&j&&j.access_token){setSession(j,em);afterAuth();return;}
+      if(v==='signup'&&(st===200||st===201)){A.msg='註冊好了。請到信箱點確認連結，再回來登入。';renderAccount();return;}
+      A.msg=authErr(st,j);renderAccount();
+    });
+    return true;
+  }
+  if(v==='syncnow'){S.sync.last=0;syncNow();return true;}
+  if(v==='logout'){
+    if(pendingCount()&&!A.confirmOut){
+      A.confirmOut=true;A.msg='還有 '+pendingCount()+' 項變更沒上傳到雲端。先試著同步，或再按一次「登出」就會遺失這些變更。';renderAccount();syncNow();return true;
+    }
+    doSignOut();return true;
+  }
+  if(v==='delacct'){
+    if(!A.delAsk){A.delAsk=true;renderAccount();return true;}
+    A.busy=true;renderAccount();
+    validToken(function(tok){
+      if(!tok){A.busy=false;A.msg='現在連不上雲端，無法刪除帳號。請稍後再試。';renderAccount();return;}
+      api('/rest/v1/rpc/delete_my_account',{method:'POST',token:tok,body:{}},function(st,j){
+        A.busy=false;
+        if(st>=200&&st<300){signOutLocal('帳號和雲端資料已刪除。');}
+        else{A.msg='刪除沒有成功（'+st+'）。請稍後再試。';A.delAsk=false;renderAccount();}
+      });
+    });
+    return true;
+  }
+  return false;
+}
+function renderAccount(){
+  var A=S.acct, h, box=$('account');
+  if(!box) return;
+  if(!cloudOn()||(S.form&&S.places.length)){box.innerHTML='';return;}
+  h='<div class="backup acct"><button type="button" class="link" data-act="acctoggle" aria-expanded="'+(A.open?'true':'false')+'">'+(S.auth?'帳號與雲端同步':'登入，把店存到雲端')+' '+(A.open?'▲':'▼')+'</button>';
+  if(A.open){
+    if(A.mode==='newpw'){
+      h+='<p class="sub">請設定新密碼。</p><div class="acct-form"><input class="input" id="acNew" type="password" autocomplete="new-password" placeholder="新密碼（至少 8 個字）" aria-label="新密碼"><button type="button" class="btn btn-sm btn-main" data-act="savepw"'+(A.busy?' disabled':'')+'>儲存新密碼</button></div>';
+    }else if(S.auth){
+      h+='<p class="sub">已登入：<strong>'+esc(S.auth.email)+'</strong>。你的店會自動存到雲端，換手機登入同一個帳號就會出現。</p>';
+      h+='<p class="sub" id="syncMsg" role="status">'+esc(syncMsgText())+'</p>';
+      h+='<div class="acct-btns"><button type="button" class="btn btn-sm btn-ghost" id="syncBtn" data-act="syncnow">立即同步</button><button type="button" class="btn btn-sm btn-ghost" data-act="logout">登出</button></div>';
+      h+='<div class="acct-btns">'+(A.delAsk?'<button type="button" class="btn btn-sm btn-danger" data-act="delacct"'+(A.busy?' disabled':'')+'>確定刪除帳號和所有資料</button>':'<button type="button" class="link" data-act="delacct">刪除帳號</button>')+'</div>';
+      if(A.delAsk) h+='<p class="sub">會刪除雲端和這支手機上的所有店，無法復原。</p>';
+    }else{
+      h+='<p class="sub">登入後，你的店會存到雲端，換手機、清除瀏覽器也不會不見。沒有帳號就按「註冊」。</p>';
+      h+='<form class="acct-form" id="acform" novalidate><input class="input" id="acEmail" type="email" inputmode="email" autocomplete="email" autocapitalize="off" placeholder="Email" aria-label="Email" value="'+esc(A.email)+'">'+
+         '<input class="input" id="acPass" type="password" autocomplete="current-password" placeholder="密碼（至少 8 個字）" aria-label="密碼">'+
+         '<div class="acct-btns"><button type="submit" class="btn btn-sm btn-main"'+(A.busy?' disabled':'')+'>登入</button><button type="button" class="btn btn-sm btn-ghost" data-act="signup"'+(A.busy?' disabled':'')+'>註冊</button><button type="button" class="link" data-act="forgot">忘記密碼</button></div></form>';
+    }
+    if(A.msg) h+='<p class="sub" role="status">'+esc(A.msg)+'</p>';
+    if(A.busy) h+='<p class="sub">處理中…</p>';
+  }
+  box.innerHTML=h+'</div>';
+}
+function handleAuthHash(){
+  var hs=location.hash||'', p={}, tok, typ;
+  if(hs.indexOf('access_token=')<0) return;
+  hs.replace(/^#/,'').split('&').forEach(function(kv){var i=kv.indexOf('=');if(i>0) p[kv.slice(0,i)]=decodeURIComponent(kv.slice(i+1));});
+  try{history.replaceState(null,'',location.pathname+location.search);}catch(e){}
+  if(!p.access_token||!p.refresh_token||!cloudOn()) return;
+  typ=p.type||''; tok=p.access_token;
+  api('/auth/v1/user',{token:tok},function(st,u){
+    if(st!==200||!u||!u.id){S.acct.msg='這個連結已經失效，請重新操作一次。';S.acct.open=true;renderAccount();return;}
+    setSession({access_token:tok,refresh_token:p.refresh_token,expires_in:Number(p.expires_in)||3600,user:u});
+    S.acct.open=true;
+    if(typ==='recovery'){S.acct.mode='newpw';S.owner=S.owner||'';persist();renderAccount();}
+    else afterAuth();
+  });
 }
 function load(){
   var raw=null;
   try{raw=JSON.parse(localStorage.getItem(KEY)||'null');}catch(e){raw=null;}
   if(raw&&Array.isArray(raw.places)) S.places=raw.places.map(cleanPlace).filter(Boolean).slice(0,MAX_PLACES);
+  if(raw&&Array.isArray(raw.tomb)) S.tomb=raw.tomb.filter(function(t){return t&&typeof t.id==='string'&&typeof t.u==='number';}).slice(-200);
+  if(raw&&typeof raw.owner==='string') S.owner=raw.owner;
+  if(raw&&raw.sy&&typeof raw.sy==='object') Object.keys(raw.sy).forEach(function(k){if(typeof raw.sy[k]==='number') S.sy[k]=raw.sy[k];});
 }
 function save(){
-  try{localStorage.setItem(KEY,JSON.stringify({places:S.places}));return true;}catch(e){return false;}
-}
-var CODE_PREFIX='MAKAN1.';
-function makeCode(){
-  /* photos (shop and food) are left out: they would make the code far too long to copy and paste */
-  var list=S.places.map(function(p){var c={},k;for(k in p) if(k!=='photo'&&k!=='foods') c[k]=p[k];return c;});
-  return CODE_PREFIX+btoa(encodeURIComponent(JSON.stringify({places:list})));
-}
-function importCode(raw){
-  var t=(raw||'').replace(/\s+/g,''), data, names={}, added=0, skipped=0, i, c, src;
-  if(t.indexOf(CODE_PREFIX)!==0) return {err:'這不是備份碼。請完整貼上以 MAKAN1. 開頭的整段文字。'};
-  try{data=JSON.parse(decodeURIComponent(atob(t.slice(CODE_PREFIX.length))));}catch(e){return {err:'備份碼讀不出來，可能複製得不完整。'};}
-  if(!data||!Array.isArray(data.places)) return {err:'備份碼裡沒有店的資料。'};
-  S.places.forEach(function(p){names[p.name.toLowerCase()]=true;});
-  for(i=0;i<data.places.length;i++){
-    src=data.places[i];
-    if(src&&typeof src==='object'&&typeof src.id!=='string') src.id='x';
-    c=cleanPlace(src);
-    if(!c||names[c.name.toLowerCase()]||S.places.length>=MAX_PLACES){skipped++;continue;}
-    c.id='p'+Date.now().toString(36)+Math.floor(Math.random()*1e6).toString(36)+added;
-    names[c.name.toLowerCase()]=true; S.places.push(c); added++;
-  }
-  return {added:added,skipped:skipped};
+  var ok=persist();
+  if(ok) scheduleSync();
+  return ok;
 }
 function newForm(){return {id:null,branches:[{name:'',address:''}],foods:[],photo:'',hoursMode:'',open:'',close:'',off:{},name:'',cuisines:{},kinds:{},dishes:[],meals:{},budget:''};}
 function toMap(arr){var m={};(arr||[]).forEach(function(k){m[k]=true;});return m;}
@@ -428,12 +687,12 @@ function addPlace(f){
   for(i=0;i<S.places.length;i++) if(S.places[i].id!==f.id&&S.places[i].name.toLowerCase()===name.toLowerCase()) return {err:'這間店已經存過了。'};
   if(f.id){
     for(i=0;i<S.places.length;i++) if(S.places[i].id===f.id){
-      S.places[i]={id:f.id,name:name,cuisines:cuisines,kinds:kinds,meals:meals,budget:f.budget,dishes:f.dishes.slice(0,MAX_DISHES),photo:cleanPhoto(f.photo),foods:cleanFoods(f.foods),hours:hoursFrom(f),branches:cleanBranches({branches:f.branches})};
+      S.places[i]={id:f.id,name:name,cuisines:cuisines,kinds:kinds,meals:meals,budget:f.budget,dishes:f.dishes.slice(0,MAX_DISHES),photo:cleanPhoto(f.photo),foods:cleanFoods(f.foods),hours:hoursFrom(f),branches:cleanBranches({branches:f.branches}),u:Date.now()};
       return {place:S.places[i]};
     }
     return {err:'找不到這間店。'};
   }
-  p={id:'p'+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36),name:name,cuisines:cuisines,kinds:kinds,meals:meals,budget:f.budget,dishes:f.dishes.slice(0,MAX_DISHES),photo:cleanPhoto(f.photo),foods:cleanFoods(f.foods),hours:hoursFrom(f),branches:cleanBranches({branches:f.branches})};
+  p={id:'p'+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36),name:name,cuisines:cuisines,kinds:kinds,meals:meals,budget:f.budget,dishes:f.dishes.slice(0,MAX_DISHES),photo:cleanPhoto(f.photo),foods:cleanFoods(f.foods),hours:hoursFrom(f),branches:cleanBranches({branches:f.branches}),u:Date.now()};
   S.places.push(p);
   return {place:p};
 }
@@ -535,6 +794,7 @@ function render(){
   if(first){
     if(!S.form) S.form=newForm();
     h+='<p class="intro"><strong>先輸入你吃過、還會再去的店</strong>每間店填：店名（可放店面照片）、種類、主食、有什麼吃、你會去的時段、預算，營業時間可選填。先存一間就可以開始，越多越好。</p>';
+    if(cloudOn()&&!S.auth) h+='<p class="sub hint-login">已經有帳號？<button type="button" class="link" data-act="acctopen">登入</button>，你的店就會自動出現。</p>';
     h+=formHtml(true);
   }else if(S.form){
     h+=formHtml(false);
@@ -549,21 +809,7 @@ function render(){
   $('main').innerHTML=h;
   if(!first&&!S.form) refreshList();
   if(S.form) initWheels();
-  renderBackup();
-}
-function renderBackup(){
-  var B=S.backup, h;
-  if(S.form&&S.places.length){$('backup').innerHTML='';return;}
-  h='<div class="backup"><button type="button" class="link" data-act="togglebackup" aria-expanded="'+(B.open?'true':'false')+'">備份與還原 '+(B.open?'▲':'▼')+'</button>';
-  if(B.open){
-    h+='<p class="sub">換手機、用無痕模式、或從「加到主畫面」打開，都是另一份空的資料，不會自動帶過去。先在有店的那邊按「產生備份碼」，把整段文字傳給自己（例如 WhatsApp），再到新的地方貼上還原。店面和食物照片都不包含在備份碼裡（照片太大，無法放進一段文字）。</p>';
-    h+='<button type="button" class="btn btn-sm btn-ghost" data-act="makecode">產生備份碼</button>';
-    if(B.code) h+='<textarea class="ta" id="codeOut" rows="4" readonly aria-label="備份碼">'+esc(B.code)+'</textarea>';
-    h+='<textarea class="ta" id="restoreText" rows="3" placeholder="在這裡貼上備份碼" aria-label="貼上備份碼">'+esc(B.text)+'</textarea>';
-    h+='<button type="button" class="btn btn-sm btn-ghost" data-act="dorestore">還原（只會加入沒有的店，不會覆蓋現有的）</button>';
-    if(B.msg) h+='<p class="sub" role="status">'+esc(B.msg)+'</p>';
-  }
-  $('backup').innerHTML=h+'</div>';
+  renderAccount();
 }
 function activeFilters(){
   var n=0;['cuisines','kinds','meals','budgets'].forEach(function(g){n+=Object.keys(S.q[g]).filter(function(k){return S.q[g][k];}).length;});
@@ -611,7 +857,9 @@ document.addEventListener('click',function(e){
   if(el.hasAttribute('data-del')){
     v=el.getAttribute('data-del');
     if(S.delAsk!==v){S.delAsk=v;render();return;}
-    S.delAsk=null; S.places=S.places.filter(function(p){return p.id!==v;});
+    S.delAsk=null;
+    if(S.auth){S.tomb=S.tomb.filter(function(t){return t.id!==v;});S.tomb.push({id:v,u:Date.now()});S.tomb=S.tomb.slice(-200);}
+    S.places=S.places.filter(function(p){return p.id!==v;});
     save(); if(!S.places.length) S.form=newForm();
     render(); return;
   }
@@ -665,20 +913,7 @@ document.addEventListener('click',function(e){
     if(v==='pickfood'){if($('pfFood'))$('pfFood').click();return;}
     if(v==='pickphoto'){if($('pfPhoto'))$('pfPhoto').click();return;}
     if(v==='rmphoto'&&F){F.photo='';$('photoSlot').innerHTML=photoSlotHtml();return;}
-    if(v==='togglebackup'){S.backup.open=!S.backup.open;renderBackup();return;}
-    if(v==='makecode'){
-      if(!S.places.length){S.backup.code='';S.backup.msg='還沒有店可以備份。';renderBackup();return;}
-      S.backup.code=makeCode(); S.backup.msg='請長按下面的文字，全選後複製。'; renderBackup();
-      try{navigator.clipboard.writeText(S.backup.code).then(function(){S.backup.msg='已複製備份碼。貼到你要保存的地方。';renderBackup();},function(){});}catch(e){}
-      return;
-    }
-    if(v==='dorestore'){
-      inp=importCode($('restoreText')?$('restoreText').value:'');
-      if(inp.err){S.backup.msg=inp.err;renderBackup();return;}
-      save(); S.backup.text=''; S.backup.code='';
-      S.backup.msg='已還原：新增 '+inp.added+' 間'+(inp.skipped?'，略過 '+inp.skipped+' 間（重複或不完整）':'')+'。';
-      S.form=null; render(); return;
-    }
+    if(acctAct(v)) return;
     if(v==='nearest'){startNearest();return;}
     if(v==='togglefilter'){S.filtOpen=!S.filtOpen;render();return;}
     if(v==='clearall'){S.q={text:'',cuisines:{},kinds:{},meals:{},budgets:{},openNow:false};render();return;}
@@ -748,9 +983,9 @@ document.addEventListener('change',function(e){
   });
 });
 document.addEventListener('input',function(e){
+  if(e.target&&e.target.id==='acEmail') S.acct.email=e.target.value;
   if(S.form&&e.target&&e.target.id==='pfName') S.form.name=e.target.value;
   if(S.form&&e.target&&e.target.getAttribute&&e.target.hasAttribute('data-bi')) {var br=S.form.branches[parseInt(e.target.getAttribute('data-bi'),10)];br[e.target.getAttribute('data-bf')]=e.target.value;if(e.target.getAttribute('data-bf')==='address'){delete br.lat;delete br.lng;delete br.nf;}}
-  if(e.target&&e.target.id==='restoreText') S.backup.text=e.target.value;
   if(!S.form&&e.target&&e.target.id==='qText'){S.q.text=e.target.value;refreshList();}
 });
 document.addEventListener('scroll',function(e){
@@ -773,6 +1008,7 @@ document.addEventListener('keydown',function(e){
 });
 document.addEventListener('submit',function(e){
   var f=e.target, r, pending, snap;
+  if(f&&f.id==='acform'){e.preventDefault();acctAct('login');return;}
   if(!f||f.id!=='pform'||!S.form) return;
   e.preventDefault();
   S.form.name=$('pfName').value;
@@ -789,8 +1025,15 @@ document.addEventListener('submit',function(e){
 });
 
 load();
+S.auth=cloudOn()?loadAuth():null;
 try{if(navigator.storage&&navigator.storage.persist) navigator.storage.persist();}catch(e){}
 render();
+if(cloudOn()){
+  handleAuthHash();
+  if(S.auth) syncNow();
+  document.addEventListener('visibilitychange',function(){if(!document.hidden&&S.auth&&Date.now()-S.sync.last>30000) syncNow();});
+  window.addEventListener('online',function(){if(S.auth) syncNow();});
+}
 })();
 </script>
 <noscript><p style="padding:16px">這個網頁需要開啟 JavaScript 才能使用。</p></noscript>
