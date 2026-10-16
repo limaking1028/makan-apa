@@ -165,6 +165,21 @@ button{cursor:pointer}
 .acct-btns{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:8px}
 .btn-danger{color:var(--accent);border-color:var(--accent);background:transparent}
 .hint-login{margin:0 0 12px}
+.pickbtn{width:100%;min-height:56px;font-size:18px}
+.pickpanel{display:flex;flex-direction:column;gap:8px}
+.pick-head{display:flex;justify-content:space-between;align-items:center}
+.pickcard{border:1.5px solid var(--rule);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:6px;background:var(--bg);margin-top:6px}
+.pickphoto{width:100%;height:170px;object-fit:cover;border-radius:8px;display:block}
+.pickname{font-size:22px;font-weight:700;line-height:1.3;overflow-wrap:anywhere}
+.pickacts{display:flex;gap:8px;margin-top:4px}
+.pickacts .btn{flex:1}
+.chip.chip-yes{background:#1f7a4d;border-color:#1f7a4d;color:#fff}
+.chip.chip-no{background:transparent;border-color:var(--accent);color:var(--accent);text-decoration:line-through}
+.pickgo{width:100%;min-height:60px;font-size:20px;margin-top:6px}
+.reelwin{height:64px;overflow:hidden;border-top:1.5px solid var(--ink-2);border-bottom:1.5px solid var(--ink-2);margin:10px 0 4px;background:var(--bg)}
+.reel{will-change:transform}
+.reel-i{height:64px;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;text-align:center;padding:0 12px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+@media (prefers-reduced-motion:reduce){.reel{transition:none!important}}
 </style>
 </head>
 <body>
@@ -187,8 +202,9 @@ var CUISINES=['malay','chinese','hk','indian','thai','japanese','korean','wester
 var CUISINE_ZH={malay:'馬來·印尼',chinese:'華人',hk:'港式',indian:'印度·嘛嘛',thai:'泰式',japanese:'日式',korean:'韓式',western:'西式',viet:'越南',other:'其他'};
 var MEALS=['b','l','t','d','s'];
 var MEAL_ZH={b:'早餐',l:'午餐',t:'下午茶',d:'晚餐',s:'宵夜'};
-var BUDGETS=['low','mid','high'];
-var BUDGET_ZH={low:'RM10 內',mid:'RM10–20',high:'RM20 以上'};
+var BUDGETS=['10','20','30','40'];
+var BUDGET_ZH={'10':'RM10–20','20':'RM20–30','30':'RM30–40','40':'RM40 以上'};
+var BUDGET_LEGACY={low:'10',mid:'10',high:'20'};   /* old three-level budgets */
 var MAX_PLACES=60, MAX_DISHES=12, MAX_BRANCHES=10;
 var KEY='makan-apa-places-v2', MAPKEY='makan-apa-map-v1', AUTHKEY='makan-apa-auth-v1';
 var CLOUD={url:'https://mhxskgtxzbxcpkkdnjkp.supabase.co',key:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1oeHNrZ3R4emJ4Y3Bra2RuamtwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNjkxODksImV4cCI6MjEwNzY0NTE4OX0.QqSIWHHD0IshE221xtAxBk6Bu6h30v2qGPgtxGvCvQg'};
@@ -363,15 +379,16 @@ function readPhoto(file,cb,side,quality){
   img.src=url;
 }
 
-var S={nearOne:{},auth:null,tomb:[],sy:{},owner:'',sync:{busy:false,err:'',last:0,again:false},acct:{open:false,mode:'login',msg:'',email:'',busy:false,delAsk:false,confirmOut:false},oneMsg:{},oneBusy:null,pos:null,map:loadMap(),places:[],form:null,delAsk:null,justSaved:false,filtOpen:false,q:{text:'',cuisines:{},kinds:{},meals:{},budgets:{},openNow:false}};
+var S={pick:{open:false,meal:'l',budget:'',openOnly:true,cur:null,skip:{},msg:'',eaten:0,stage:'ready',spinId:0,more:false,noRecent:false,w:{cuisines:{},kinds:{}}},nearOne:{},auth:null,tomb:[],sy:{},owner:'',sync:{busy:false,err:'',last:0,again:false},acct:{open:false,mode:'login',msg:'',email:'',busy:false,delAsk:false,confirmOut:false},oneMsg:{},oneBusy:null,pos:null,map:loadMap(),places:[],form:null,delAsk:null,justSaved:false,filtOpen:false,q:{text:'',cuisines:{},kinds:{},meals:{},budgets:{},openNow:false}};
 
 function esc(x){return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function $(id){return document.getElementById(id);}
 
 /* ---------- data ---------- */
 function cleanPlace(p){
-  var kinds, meals, dishes, cuisines, seen={};
+  var kinds, meals, dishes, cuisines, seen={}, bud;
   if(!p||typeof p!=='object'||typeof p.id!=='string'||typeof p.name!=='string') return null;
+  bud=BUDGET_LEGACY[p.budget]||p.budget;
   kinds=Array.isArray(p.kinds)?p.kinds.filter(function(k){return KINDS.indexOf(k)>-1;}):[];
   cuisines=Array.isArray(p.cuisines)?p.cuisines.filter(function(k){return CUISINES.indexOf(k)>-1;}):[];
   meals=Array.isArray(p.meals)?p.meals.filter(function(k){return MEALS.indexOf(k)>-1;}):[];
@@ -382,8 +399,8 @@ function cleanPlace(p){
     if(!x||x.length>30||seen[k]) return false;
     seen[k]=true; return true;
   }).map(function(x){return x.trim();}).slice(0,MAX_DISHES):[];
-  if(!p.name.trim()||!kinds.length||!meals.length||BUDGETS.indexOf(p.budget)<0||!dishes.length) return null;
-  return {id:p.id.slice(0,24),name:p.name.trim().slice(0,40),cuisines:cuisines,kinds:kinds,meals:meals,budget:p.budget,dishes:dishes,photo:cleanPhoto(p.photo),foods:cleanFoods(p.foods),hours:cleanHours(p.hours),branches:cleanBranches(p),u:(typeof p.u==='number'&&isFinite(p.u)&&p.u>0)?Math.floor(p.u):0};
+  if(!p.name.trim()||!kinds.length||!meals.length||BUDGETS.indexOf(bud)<0||!dishes.length) return null;
+  return {id:p.id.slice(0,24),name:p.name.trim().slice(0,40),cuisines:cuisines,kinds:kinds,meals:meals,budget:bud,dishes:dishes,photo:cleanPhoto(p.photo),foods:cleanFoods(p.foods),hours:cleanHours(p.hours),branches:cleanBranches(p),visits:Array.isArray(p.visits)?p.visits.filter(function(n){return typeof n==='number'&&isFinite(n)&&n>0;}).map(Math.floor).slice(-30):[],u:(typeof p.u==='number'&&isFinite(p.u)&&p.u>0)?Math.floor(p.u):0};
 }
 /* ---------- cloud account + sync (Supabase REST, no library) ---------- */
 function cloudOn(){return !!(CLOUD.url&&CLOUD.key);}
@@ -687,7 +704,7 @@ function addPlace(f){
   for(i=0;i<S.places.length;i++) if(S.places[i].id!==f.id&&S.places[i].name.toLowerCase()===name.toLowerCase()) return {err:'這間店已經存過了。'};
   if(f.id){
     for(i=0;i<S.places.length;i++) if(S.places[i].id===f.id){
-      S.places[i]={id:f.id,name:name,cuisines:cuisines,kinds:kinds,meals:meals,budget:f.budget,dishes:f.dishes.slice(0,MAX_DISHES),photo:cleanPhoto(f.photo),foods:cleanFoods(f.foods),hours:hoursFrom(f),branches:cleanBranches({branches:f.branches}),u:Date.now()};
+      S.places[i]={visits:S.places[i].visits||[],id:f.id,name:name,cuisines:cuisines,kinds:kinds,meals:meals,budget:f.budget,dishes:f.dishes.slice(0,MAX_DISHES),photo:cleanPhoto(f.photo),foods:cleanFoods(f.foods),hours:hoursFrom(f),branches:cleanBranches({branches:f.branches}),u:Date.now()};
       return {place:S.places[i]};
     }
     return {err:'找不到這間店。'};
@@ -783,9 +800,144 @@ function formHtml(first){
   h+='<div class="actions'+(first?' one':'')+'">'+(first?'':'<button type="button" class="btn" data-act="cancel">取消</button>')+'<button type="submit" class="btn btn-main">'+(F.id?'儲存修改':'儲存這間店')+'</button></div>';
   return h+'</form>';
 }
+/* ---------- "help me pick": filters (want / don't want), start button, 1-second reel, result ---------- */
+var SPIN_MS=1000, REEL_H=64;
+function mealNow(){var h=new Date().getHours();return h>=5&&h<11?'b':h>=11&&h<15?'l':h>=15&&h<18?'t':h>=18&&h<22?'d':'s';}
+function dayAgo(ms){
+  var a=new Date(ms), b=new Date(), d=Math.round((new Date(b.getFullYear(),b.getMonth(),b.getDate())-new Date(a.getFullYear(),a.getMonth(),a.getDate()))/864e5);
+  return d<=0?'今天':d===1?'昨天':d+' 天前';
+}
+function eatText(p){var v=p.visits||[];return v.length?'上次吃：'+dayAgo(v[v.length-1])+' · 共 '+v.length+' 次':'';}
+function passWant(map,vals){
+  var want=[], no=[], k;
+  for(k in map){if(map[k]===1) want.push(k); else if(map[k]===-1) no.push(k);}
+  if(no.some(function(x){return vals.indexOf(x)>-1;})) return false;
+  if(want.length&&!want.some(function(x){return vals.indexOf(x)>-1;})) return false;
+  return true;
+}
+function pickPool(ignoreOpen){
+  var P=S.pick, now=new Date(), recent=Date.now()-3*864e5;
+  return S.places.filter(function(p){
+    var v=p.visits||[];
+    if(p.meals.indexOf(P.meal)<0) return false;
+    if(P.budget&&p.budget!==P.budget) return false;
+    if(!ignoreOpen&&P.openOnly&&openNow(p,now)===false) return false;
+    if(!passWant(P.w.cuisines,p.cuisines||[])||!passWant(P.w.kinds,p.kinds||[])) return false;
+    if(P.noRecent&&v.length&&v[v.length-1]>recent) return false;
+    return true;
+  });
+}
+function pickWeight(p){var v=p.visits||[],last=v.length?v[v.length-1]:0,d;if(!last) return 1;d=(Date.now()-last)/864e5;return Math.max(0.08,Math.min(1,d/7));}
+function pickReset(){var P=S.pick;P.spinId++;P.stage='ready';P.cur=null;P.skip={};P.eaten=0;P.msg='';}
+function emptyMsg(){
+  var P=S.pick;
+  if(P.openOnly&&pickPool(true).length) return '目前沒有店正在營業。可以關掉「只看現在營業中」，或換個時段。';
+  return '沒有符合條件的店。可以換個時段、放寬預算或「要／不要」條件，或關掉「只看現在營業中」。';
+}
+function pickOne(){
+  var P=S.pick, pool=pickPool(false), avail, tot=0, r, i;
+  P.eaten=0; P.msg='';
+  if(!pool.length){P.cur=null;P.msg=emptyMsg();return false;}
+  avail=pool.filter(function(p){return !P.skip[p.id];});
+  if(!avail.length){P.skip={};avail=pool;P.msg=pool.length>1?'符合的店都轉過一輪了，重新開始。':'';}
+  avail.forEach(function(p){tot+=pickWeight(p);});
+  r=Math.random()*tot;
+  for(i=0;i<avail.length;i++){r-=pickWeight(avail[i]);if(r<=0) break;}
+  P.cur=avail[Math.min(i,avail.length-1)].id;
+  return true;
+}
+function pickCur(){var c=null;S.places.forEach(function(p){if(p.id===S.pick.cur) c=p;});return c;}
+function wantChip(group,k,label){
+  var st=S.pick.w[group][k]||0;
+  return '<button type="button" class="chip'+(st===1?' chip-yes':st===-1?' chip-no':'')+'" data-pt="'+group+':'+esc(k)+'" aria-label="'+esc(label)+(st===1?'：要':st===-1?'：不要':'：不限')+'">'+(st===1?'✓ ':st===-1?'✕ ':'')+esc(label)+'</button>';
+}
+function pickChips(){
+  var P=S.pick, h='';
+  h+='<div class="fl">時段</div><div class="chips">'+MEALS.map(function(k){return chip('data-pm',k,MEAL_ZH[k],P.meal===k);}).join('')+'</div>';
+  h+='<div class="fl">預算</div><div class="chips">'+chip('data-pb','','不限',!P.budget)+BUDGETS.map(function(k){return chip('data-pb',k,BUDGET_ZH[k],P.budget===k);}).join('')+'</div>';
+  h+='<div class="chips">'+chip('data-po','1','只看現在營業中',P.openOnly)+'</div>';
+  h+='<button type="button" class="link" data-pmore="1" aria-expanded="'+(P.more?'true':'false')+'">要／不要的條件 '+(P.more?'▲':'▼')+'</button>';
+  if(P.more){
+    h+='<p class="sub">點一下＝要，再點一下＝不要，再點一次＝取消。</p>';
+    h+='<div class="fl">種類</div><div class="chips">'+CUISINES.map(function(k){return wantChip('cuisines',k,CUISINE_ZH[k]);}).join('')+'</div>';
+    h+='<div class="fl">主食</div><div class="chips">'+KINDS.map(function(k){return wantChip('kinds',k,KIND_ZH[k]);}).join('')+'</div>';
+    h+='<div class="fl">最近吃過的</div><div class="chips">'+chip('data-pr','1','不要最近 3 天吃過的',P.noRecent)+'</div>';
+  }
+  return h;
+}
+function reelHtml(p){
+  var names=pickPool(false).map(function(x){return x.name;}), items=[], i, j, t;
+  if(!names.length) names=[p.name];
+  while(items.length<14) items=items.concat(names);
+  items=items.slice(0,14);
+  for(i=items.length-1;i>0;i--){j=Math.floor(Math.random()*(i+1));t=items[i];items[i]=items[j];items[j]=t;}
+  items[items.length-1]=p.name;
+  return '<div class="reelwin" aria-hidden="true"><div class="reel" id="reel" data-n="'+items.length+'">'+items.map(function(n){return '<div class="reel-i">'+esc(n)+'</div>';}).join('')+'</div></div><p class="sub" role="status">轉轉轉…</p>';
+}
+function pickResultHtml(){
+  var P=S.pick, p=pickCur(), h, on, last;
+  if(!p) return P.msg?'<p class="sub" role="status">'+esc(P.msg)+'</p>':'';
+  on=openNow(p,new Date()); last=eatText(p);
+  h='<div class="pickcard">'+(p.photo?'<img class="pickphoto" alt="" src="'+esc(p.photo)+'">':'')+
+    '<div class="pickname">'+esc(p.name)+'</div>'+
+    '<div class="place-meta">'+esc([(p.cuisines||[]).map(function(k){return CUISINE_ZH[k];}).join('、'),p.kinds.map(function(k){return KIND_ZH[k];}).join('、'),BUDGET_ZH[p.budget]].filter(Boolean).join(' · '))+(on===true?' · <span class="open-tag">現在營業中</span>':on===false?' · <span class="closed-tag">現在休息</span>':'')+'</div>'+
+    '<div class="place-dishes">'+esc(p.dishes.join('、'))+'</div>'+
+    ((p.foods&&p.foods.length)?'<span class="foodrow">'+p.foods.map(function(u){return '<img alt="" src="'+esc(u)+'">';}).join('')+'</span>':'')+
+    (last?'<div class="place-meta">'+esc(last)+'</div>':'')+addrHtml(p);
+  if(P.eaten) h+='<p class="saved" role="status">已記下，吃得開心！ <button type="button" class="link" data-act="undoeat">撤銷</button></p>';
+  else h+='<div class="pickacts"><button type="button" class="btn btn-main" data-act="eat">✓ 要，就吃這間</button><button type="button" class="btn" data-act="repick">✕ 不要，再轉一次</button></div>';
+  if(P.msg) h+='<p class="sub" role="status">'+esc(P.msg)+'</p>';
+  return h+'</div>';
+}
+function pickStageHtml(){
+  var P=S.pick, n;
+  if(P.stage==='spin'&&pickCur()) return reelHtml(pickCur());
+  if(P.stage==='done') return pickResultHtml();
+  n=pickPool(false).length;
+  if(!n) return '<p class="sub" role="status">'+esc(emptyMsg())+'</p>';
+  return '<p class="sub" role="status">符合條件的店：'+n+' 間</p><button type="button" class="btn btn-main pickgo" data-act="pickstart">▶ 開始</button>';
+}
+function renderPick(){
+  var box=$('pickBox'), P=S.pick;
+  if(!box) return;
+  if(!P.open){box.innerHTML='<button type="button" class="btn btn-main pickbtn" data-act="pickopen">🎲 今天吃什麼？幫我選</button>';return;}
+  box.innerHTML='<div class="panel pickpanel"><div class="pick-head"><strong>幫我選</strong><button type="button" class="link" data-act="pickclose">收起</button></div>'+pickChips()+'<div id="pickCard" aria-live="polite">'+pickStageHtml()+'</div></div>';
+}
+function startSpin(){
+  var P=S.pick, id, r, n, calm=false;
+  if(!pickOne()){P.stage='ready';renderPick();return;}
+  id=++P.spinId; P.stage='spin'; renderPick();
+  try{calm=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;}catch(e){}
+  r=$('reel');
+  if(r&&!calm){
+    n=parseInt(r.getAttribute('data-n'),10);
+    r.style.transform='translateY(0)'; void r.offsetHeight;
+    r.style.transition='transform '+SPIN_MS+'ms cubic-bezier(.15,.65,.2,1)';
+    r.style.transform='translateY(-'+((n-1)*REEL_H)+'px)';
+  }
+  setTimeout(function(){if(P.spinId===id&&P.stage==='spin'){P.stage='done';renderPick();}},calm?0:SPIN_MS+60);
+}
+function pickAct(v){
+  var P=S.pick, p;
+  if(v==='pickopen'){P.open=true;P.meal=mealNow();pickReset();renderPick();return true;}
+  if(v==='pickclose'){P.spinId++;P.open=false;renderPick();return true;}
+  if(v==='pickstart'){pickReset();startSpin();return true;}
+  if(v==='repick'){if(P.cur) P.skip[P.cur]=true;startSpin();return true;}
+  if(v==='eat'){
+    p=pickCur();
+    if(p){p.visits=(p.visits||[]).concat([Date.now()]).slice(-30);p.u=Date.now();P.eaten=p.visits[p.visits.length-1];save();renderPick();if($('listArea')) refreshList();}
+    return true;
+  }
+  if(v==='undoeat'){
+    p=pickCur();
+    if(p&&P.eaten){p.visits=(p.visits||[]).filter(function(t){return t!==P.eaten;});p.u=Date.now();P.eaten=0;save();renderPick();if($('listArea')) refreshList();}
+    return true;
+  }
+  return false;
+}
 function rowHtml(p){
   var meta=[(p.cuisines||[]).map(function(k){return CUISINE_ZH[k];}).join('、'), p.meals.map(function(k){return MEAL_ZH[k];}).join('、'), p.kinds.map(function(k){return KIND_ZH[k];}).join('、'), BUDGET_ZH[p.budget]].filter(Boolean).join(' · '), hrs=hoursText(p), on=openNow(p,new Date());
-  return '<li class="place"><button type="button" class="thumb" data-edit="'+esc(p.id)+'" tabindex="-1" aria-hidden="true">'+(p.photo?'<img alt="" src="'+esc(p.photo)+'">':IC_SHOP)+'</button><div class="place-body"><button type="button" class="place-main" data-edit="'+esc(p.id)+'" aria-label="編輯 '+esc(p.name)+'"><span class="place-name">'+esc(p.name)+'</span><span class="place-meta">'+esc(meta)+'</span>'+(hrs?'<span class="place-meta">營業 '+esc(hrs)+(on===true?' · <span class="open-tag">現在營業中</span>':on===false?' · <span class="closed-tag">現在休息</span>':'')+'</span>':'')+'<span class="place-dishes">'+esc(p.dishes.join('、'))+'</span>'+((p.foods&&p.foods.length)?'<span class="foodrow">'+p.foods.map(function(u){return '<img alt="" src="'+esc(u)+'">';}).join('')+'</span>':'')+'</button>'+addrHtml(p)+'</div>'+
+  return '<li class="place"><button type="button" class="thumb" data-edit="'+esc(p.id)+'" tabindex="-1" aria-hidden="true">'+(p.photo?'<img alt="" src="'+esc(p.photo)+'">':IC_SHOP)+'</button><div class="place-body"><button type="button" class="place-main" data-edit="'+esc(p.id)+'" aria-label="編輯 '+esc(p.name)+'"><span class="place-name">'+esc(p.name)+'</span><span class="place-meta">'+esc(meta)+'</span>'+(hrs?'<span class="place-meta">營業 '+esc(hrs)+(on===true?' · <span class="open-tag">現在營業中</span>':on===false?' · <span class="closed-tag">現在休息</span>':'')+'</span>':'')+(eatText(p)?'<span class="place-meta">'+esc(eatText(p))+'</span>':'')+'<span class="place-dishes">'+esc(p.dishes.join('、'))+'</span>'+((p.foods&&p.foods.length)?'<span class="foodrow">'+p.foods.map(function(u){return '<img alt="" src="'+esc(u)+'">';}).join('')+'</span>':'')+'</button>'+addrHtml(p)+'</div>'+
     '<div class="place-acts">'+
     (S.delAsk===p.id?'<button type="button" class="del sure" data-del="'+esc(p.id)+'">確定刪除</button>':'<button type="button" class="del" data-del="'+esc(p.id)+'" aria-label="刪除 '+esc(p.name)+'">×</button>')+'</div></li>';
 }
@@ -800,14 +952,15 @@ function render(){
     h+=formHtml(false);
   }else{
     if(S.justSaved) h+='<p class="saved">已存好</p>';
-    h+='<button type="button" class="btn btn-main" data-act="add">+ 再新增一間店</button>';
+    h+='<div id="pickBox"></div>';
+    h+='<button type="button" class="btn" data-act="add">+ 再新增一間店</button>';
     h+=searchHtml();
     h+='<div class="near-row"><button type="button" class="btn btn-sm btn-ghost" id="nearBtn" data-act="nearest"></button><span class="sub" id="nearMsg" role="status" aria-live="polite"></span></div>';
     h+='<div class="mappick">'+mapPickHtml()+'</div>';
     h+='<div class="list-head"><span id="qCount"></span><button type="button" class="link" id="qClear" data-act="clearall" hidden>清除搜尋</button></div><ul class="plist" id="listArea"></ul>';
   }
   $('main').innerHTML=h;
-  if(!first&&!S.form) refreshList();
+  if(!first&&!S.form){refreshList();renderPick();}
   if(S.form) initWheels();
   renderAccount();
 }
@@ -846,12 +999,14 @@ function refreshList(){
   $('qClear').hidden=!searching;
   $('qCount').textContent=(searching?'符合 '+arr.length+' / '+S.places.length+' 間':'我的店 · '+S.places.length)+(S.near?' · 由近到遠':'');
   nearUi();
-  $('listArea').innerHTML=arr.length?arr.map(rowHtml).join(''):'<li class="empty">沒有符合的店。<button type="button" class="link" data-act="clearall">清除搜尋</button></li>';
+  var noneOpen=false, keep;
+  if(!arr.length&&S.q.openNow){keep=S.q.openNow;S.q.openNow=false;noneOpen=S.places.some(matches);S.q.openNow=keep;}
+  $('listArea').innerHTML=arr.length?arr.map(rowHtml).join(''):'<li class="empty">'+(noneOpen?'目前沒有店正在營業。':'沒有符合的店。')+'<button type="button" class="link" data-act="clearall">清除搜尋</button></li>';
 }
 
 /* ---------- events ---------- */
 document.addEventListener('click',function(e){
-  var el=e.target&&e.target.closest?e.target.closest('[data-act],[data-cuisine],[data-kind],[data-meal],[data-budget],[data-map],[data-rmbr],[data-nearone],[data-rmdish],[data-del],[data-edit],[data-fc],[data-fk],[data-fm],[data-fb],[data-fo],[data-hm],[data-hd],[data-wi],[data-rmfood]'):null, v, F=S.form, inp;
+  var el=e.target&&e.target.closest?e.target.closest('[data-act],[data-cuisine],[data-kind],[data-meal],[data-budget],[data-map],[data-pm],[data-pb],[data-po],[data-pr],[data-pmore],[data-pt],[data-rmbr],[data-nearone],[data-rmdish],[data-del],[data-edit],[data-fc],[data-fk],[data-fm],[data-fb],[data-fo],[data-hm],[data-hd],[data-wi],[data-rmfood]'):null, v, F=S.form, inp;
   if(S.delAsk&&!(el&&el.hasAttribute('data-del'))){S.delAsk=null;render();}
   if(!el) return;
   if(el.hasAttribute('data-del')){
@@ -876,6 +1031,17 @@ document.addEventListener('click',function(e){
     $('brArea').innerHTML=brAreaHtml(); return;
   }
   if(el.hasAttribute('data-nearone')){startNearOne(el.getAttribute('data-nearone'));return;}
+  if(el.hasAttribute('data-pm')){S.pick.meal=el.getAttribute('data-pm');pickReset();renderPick();return;}
+  if(el.hasAttribute('data-pb')){S.pick.budget=el.getAttribute('data-pb');pickReset();renderPick();return;}
+  if(el.hasAttribute('data-po')){S.pick.openOnly=!S.pick.openOnly;pickReset();renderPick();return;}
+  if(el.hasAttribute('data-pr')){S.pick.noRecent=!S.pick.noRecent;pickReset();renderPick();return;}
+  if(el.hasAttribute('data-pmore')){S.pick.more=!S.pick.more;renderPick();return;}
+  if(el.hasAttribute('data-pt')){
+    v=el.getAttribute('data-pt').split(':');
+    var cur=S.pick.w[v[0]][v[1]]||0, nx=cur===0?1:cur===1?-1:0;
+    if(nx) S.pick.w[v[0]][v[1]]=nx; else delete S.pick.w[v[0]][v[1]];
+    pickReset();renderPick();return;
+  }
   if(el.hasAttribute('data-map')){
     S.map=el.getAttribute('data-map');
     try{localStorage.setItem(MAPKEY,S.map);}catch(err){}
@@ -913,7 +1079,7 @@ document.addEventListener('click',function(e){
     if(v==='pickfood'){if($('pfFood'))$('pfFood').click();return;}
     if(v==='pickphoto'){if($('pfPhoto'))$('pfPhoto').click();return;}
     if(v==='rmphoto'&&F){F.photo='';$('photoSlot').innerHTML=photoSlotHtml();return;}
-    if(acctAct(v)) return;
+    if(acctAct(v)||pickAct(v)) return;
     if(v==='nearest'){startNearest();return;}
     if(v==='togglefilter'){S.filtOpen=!S.filtOpen;render();return;}
     if(v==='clearall'){S.q={text:'',cuisines:{},kinds:{},meals:{},budgets:{},openNow:false};render();return;}
